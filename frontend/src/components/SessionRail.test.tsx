@@ -305,6 +305,7 @@ describe('SessionRail responsive sizing', () => {
     expect(pinBlur).toHaveBeenCalledOnce();
     expect(actions().parentElement).toHaveClass('sessionTabActionsSuppressed');
     expect(getComputedStyle(actions()).opacity).toBe('0');
+    pinBlur.mockRestore();
 
     fireEvent.pointerLeave(actions().parentElement!);
     const unpinAction = screen.getByLabelText('Unpin Older target');

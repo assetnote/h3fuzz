@@ -58,12 +58,23 @@ func readGroupFromFile(filename string) (ScraperGroup, error) {
 func FromDir(dirname string, activestr string) (ffuf.Scraper, ffuf.Multierror) {
 	scr := Scraper{Rules: make([]*ScraperRule, 0)}
 	errs := ffuf.NewMultierror()
+	// An empty selection explicitly disables installed scraper groups. Do not
+	// require the optional defaults directory to exist in that mode, which is
+	// important for fresh installations and the web console's default profile.
+	if strings.TrimSpace(activestr) == "" {
+		return &scr, errs
+	}
 	activegrps := parseActiveGroups(activestr)
 	// Enumerate the directory that was passed in; the entries below are opened
 	// relative to dirname, so reading a different directory (the global
 	// ffuf.SCRAPERDIR) here would mismatch the two.
 	all_files, err := os.ReadDir(dirname)
 	if err != nil {
+		// Installed scraper groups are optional. A fresh installation has no
+		// scraper directory yet, which is equivalent to an empty rule set.
+		if os.IsNotExist(err) {
+			return &scr, errs
+		}
 		errs.Add(err)
 		return &scr, errs
 	}

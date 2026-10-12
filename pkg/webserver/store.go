@@ -815,8 +815,12 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 		return nil, nil, err
 	}
 	initialTerminalSequence := terminalSequence
-	terminalSequence, terminalEvents := assignTerminalEvents(sessionID, terminalSequence, results, logs)
-	visibleResults := make([]StoredResult, 0, len(results))
+	storedLogs := append([]TerminalEntry(nil), logs...)
+	terminalSequence, terminalEvents := assignTerminalEvents(sessionID, terminalSequence, results, storedLogs)
+	// Keep assigned IDs separate until commit so a failed transaction cannot
+	// leak rolled-back cursors through the caller's slice. An ID-only sidecar is
+	// substantially smaller than copying every result on this hot path.
+	assignedIDs := make([]int64, len(results))
 	var resultStatement *sql.Stmt
 	if len(results) > 0 {
 		resultStatement, err = tx.PrepareContext(ctx, `INSERT INTO results
@@ -828,42 +832,53 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 		}
 		defer resultStatement.Close()
 	}
+	visibleResults := make([]StoredResult, 0, len(results))
 	for i := range results {
-		input, _ := json.Marshal(results[i].Input)
-		scraper, _ := json.Marshal(results[i].ScraperData)
+		input, marshalErr := json.Marshal(results[i].Input)
+		if marshalErr != nil {
+			return nil, nil, fmt.Errorf("marshal result input: %w", marshalErr)
+		}
+		scraper, marshalErr := json.Marshal(results[i].ScraperData)
+		if marshalErr != nil {
+			return nil, nil, fmt.Errorf("marshal result scraper data: %w", marshalErr)
+		}
 		origin, pathKey, suffix, trailingSlash := resultTreeMetadata(results[i].URL, results[i].Host)
-		res, err := resultStatement.ExecContext(ctx, sessionID, input, results[i].Position, results[i].StatusCode,
+		inserted, insertErr := resultStatement.ExecContext(ctx, sessionID, input, results[i].Position, results[i].StatusCode,
 			results[i].ContentLength, results[i].ContentWords, results[i].ContentLines, results[i].ContentType,
 			results[i].RedirectLocation, results[i].URL, results[i].DurationNS, scraper, results[i].Host,
 			results[i].ResponseFingerprint, results[i].CreatedAt.UnixNano(),
 			origin, pathKey, suffix, boolInt(trailingSlash))
-		if err != nil {
-			return nil, nil, err
+		if insertErr != nil {
+			return nil, nil, insertErr
 		}
-		results[i].ID, _ = res.LastInsertId()
+		assignedIDs[i], insertErr = inserted.LastInsertId()
+		if insertErr != nil {
+			return nil, nil, insertErr
+		}
 		keep, filterErr := resultFilter.keep(results[i])
 		if filterErr != nil {
 			return nil, nil, filterErr
 		}
 		if keep {
-			visibleResults = append(visibleResults, results[i])
+			visible := results[i]
+			visible.ID = assignedIDs[i]
+			visibleResults = append(visibleResults, visible)
 		}
 	}
-	if err := insertTerminalResultRanges(ctx, tx, sessionID, results); err != nil {
+	if err := insertTerminalResultRanges(ctx, tx, sessionID, results, assignedIDs); err != nil {
 		return nil, nil, err
 	}
 	var logStatement *sql.Stmt
-	if len(logs) > 0 {
+	if len(storedLogs) > 0 {
 		logStatement, err = tx.PrepareContext(ctx, `INSERT INTO terminal_log(session_id,at,level,message,terminal_sequence) VALUES(?,?,?,?,?)`)
 		if err != nil {
 			return nil, nil, err
 		}
 		defer logStatement.Close()
 	}
-	for i := range logs {
-		entry := &logs[i]
-		_, err := logStatement.ExecContext(ctx, sessionID, entry.At.UnixNano(), entry.Level, entry.Message, entry.ID)
-		if err != nil {
+	for i := range storedLogs {
+		entry := &storedLogs[i]
+		if _, err := logStatement.ExecContext(ctx, sessionID, entry.At.UnixNano(), entry.Level, entry.Message, entry.ID); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -876,6 +891,13 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
+	for i := range results {
+		results[i].ID = assignedIDs[i]
+	}
+	for i := range logs {
+		logs[i].ID = storedLogs[i].ID
+		logs[i].SessionID = storedLogs[i].SessionID
+	}
 	return visibleResults, terminalEvents, nil
 }
 
@@ -884,7 +906,7 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 // small row instead of one additional index entry per result. Timestamp
 // reordering or interleaved lifecycle messages split the mapping only where
 // the result-ID and terminal-sequence runs stop being contiguous.
-func insertTerminalResultRanges(ctx context.Context, tx *sql.Tx, sessionID string, results []StoredResult) error {
+func insertTerminalResultRanges(ctx context.Context, tx *sql.Tx, sessionID string, results []StoredResult, resultIDs []int64) error {
 	if len(results) == 0 {
 		return nil
 	}
@@ -896,7 +918,7 @@ func insertTerminalResultRanges(ctx context.Context, tx *sql.Tx, sessionID strin
 	}
 	defer statement.Close()
 
-	firstID := results[0].ID
+	firstID := resultIDs[0]
 	lastID := firstID
 	firstSequence := results[0].terminalSequence
 	lastSequence := firstSequence
@@ -906,15 +928,16 @@ func insertTerminalResultRanges(ctx context.Context, tx *sql.Tx, sessionID strin
 	}
 	for index := 1; index < len(results); index++ {
 		result := results[index]
-		if result.ID == lastID+1 && result.terminalSequence == lastSequence+1 {
-			lastID = result.ID
+		resultID := resultIDs[index]
+		if resultID == lastID+1 && result.terminalSequence == lastSequence+1 {
+			lastID = resultID
 			lastSequence = result.terminalSequence
 			continue
 		}
 		if err := flush(); err != nil {
 			return err
 		}
-		firstID, lastID = result.ID, result.ID
+		firstID, lastID = resultID, resultID
 		firstSequence, lastSequence = result.terminalSequence, result.terminalSequence
 	}
 	return flush()

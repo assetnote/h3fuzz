@@ -157,6 +157,65 @@ func TestStoreBatchPreservesIDsOrderAndJSON(t *testing.T) {
 	}
 }
 
+func TestStoreBatchFailureRollsBackWithoutAssigningIDs(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "batch-rollback.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session := testSession("batch-rollback")
+	if err := store.CreateSession(context.Background(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`CREATE TRIGGER reject_batch_result BEFORE INSERT ON results
+		WHEN NEW.position = 80 BEGIN SELECT RAISE(ABORT, 'reject batch result'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	results := make([]StoredResult, 103)
+	now := time.Now().UTC()
+	for index := range results {
+		results[index] = StoredResult{
+			Input:      map[string][]byte{"FUZZ": []byte(fmt.Sprintf("item-%03d", index))},
+			Position:   index,
+			StatusCode: 200,
+			URL:        fmt.Sprintf("https://example.test/item-%03d", index),
+			CreatedAt:  now.Add(time.Duration(index) * time.Nanosecond),
+		}
+	}
+	logs := []TerminalEntry{{At: now.Add(time.Second), Level: "info", Message: "batch complete"}}
+
+	if _, _, err := store.InsertResultBatch(context.Background(), session.ID, results, logs); err == nil {
+		t.Fatal("batch insert unexpectedly succeeded")
+	}
+	for index := range results {
+		if results[index].ID != 0 {
+			t.Fatalf("failed batch assigned result %d ID %d", index, results[index].ID)
+		}
+	}
+	if logs[0].ID != 0 || logs[0].SessionID != "" {
+		t.Fatalf("failed batch assigned terminal cursor: %#v", logs[0])
+	}
+	for _, table := range []string{"results", "terminal_result_ranges"} {
+		var count int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE session_id=?`, session.ID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("failed batch left %d rows in %s", count, table)
+		}
+	}
+	var resultCount, terminalSequence int64
+	if err := store.db.QueryRow(`SELECT result_count,terminal_sequence FROM sessions WHERE id=?`, session.ID).
+		Scan(&resultCount, &terminalSequence); err != nil {
+		t.Fatal(err)
+	}
+	if resultCount != 0 || terminalSequence != 0 {
+		t.Fatalf("failed batch changed session counters: result_count=%d terminal_sequence=%d",
+			resultCount, terminalSequence)
+	}
+}
+
 func TestStoreBackfillsCompletedCountForLegacyProgress(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "legacy-progress.db"))
 	if err != nil {

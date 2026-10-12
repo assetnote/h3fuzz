@@ -26,6 +26,35 @@ func TestFromDir_UsesDirnameNotGlobal(t *testing.T) {
 	}
 }
 
+func TestFromDirTreatsMissingOptionalDirectoryAsEmpty(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+
+	loaded, errs := FromDir(missing, "")
+	if err := errs.ErrorOrNil(); err != nil {
+		t.Fatalf("disabled scrapers should not read the optional defaults directory: %v", err)
+	}
+	if loaded.NeedsResponseBody() {
+		t.Fatal("disabled scrapers unexpectedly require the response body")
+	}
+
+	active, activeErrs := FromDir(missing, "all")
+	if err := activeErrs.ErrorOrNil(); err != nil {
+		t.Fatalf("a missing optional defaults directory should be empty, got %v", err)
+	}
+	if active.NeedsResponseBody() {
+		t.Fatal("a missing optional defaults directory unexpectedly loaded rules")
+	}
+
+	notDirectory := filepath.Join(t.TempDir(), "scraper.json")
+	if err := os.WriteFile(notDirectory, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, invalidErrs := FromDir(notDirectory, "all")
+	if err := invalidErrs.ErrorOrNil(); err == nil {
+		t.Fatal("invalid scraper directory should still return an error")
+	}
+}
+
 func TestNeedsResponseBodyMatchesExecuteTargets(t *testing.T) {
 	tests := []struct {
 		name   string

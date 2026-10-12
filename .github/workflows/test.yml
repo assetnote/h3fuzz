@@ -115,7 +115,7 @@ jobs:
           go-version: stable
       - name: coverage
         run: |
-          go test -coverprofile=coverage.out ./... >/dev/null
+          go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
 
   # Characterization goldens (help output, etc.) must be regenerated and

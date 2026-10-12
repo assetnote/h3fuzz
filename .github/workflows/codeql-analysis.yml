@@ -11,6 +11,10 @@ on:
 
 jobs:
   analyze:
+    # Code scanning is available without GitHub Advanced Security once the
+    # repository is public. Keep private staging runs green without discarding
+    # the workflow that will protect the published repository.
+    if: github.event.repository.visibility == 'public'
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:

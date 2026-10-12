@@ -1,2 +1,10 @@
 allowBuilds:
   esbuild: true
+
+overrides:
+  source-map-js: 1.2.2
+
+# Permit the exact patched release even when a developer enforces pnpm's
+# minimum-release-age policy. Earlier releases are affected by GHSA-68fv-2mgg-jv7q.
+minimumReleaseAgeExclude:
+  - source-map-js@1.2.2
