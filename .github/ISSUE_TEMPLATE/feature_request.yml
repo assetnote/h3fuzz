@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an idea or improvement for h3fuzz
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [README](https://github.com/assetnote/h3fuzz#readme), [documentation index](https://github.com/assetnote/h3fuzz/blob/main/docs/README.md), and existing issues before proposing a feature. h3fuzz retains ffuf-compatible CLI behavior while adding a web console and HTTP/3-specific capabilities, so describe which interface and transport your proposal affects.
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      description: Which part of h3fuzz would this improve?
+      multiple: true
+      options:
+        - Web console
+        - Command line
+        - HTTP/3 transport and performance
+        - Documentation or developer experience
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case, not just the feature. What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like h3fuzz to do? Include the expected workflow or command-line behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing flags or workarounds you tried, and why they fall short.
+    validations:
+      required: false

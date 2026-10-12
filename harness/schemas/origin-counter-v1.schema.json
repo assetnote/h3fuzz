@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetnote.example/h3fuzz/origin-counter-v1.schema.json",
+  "title": "h3fuzz instrumented-origin counter snapshot v1",
+  "type": "object",
+  "required": ["schema_version", "snapshot_id", "captured_at", "origin", "counters"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "snapshot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "captured_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "origin": {
+      "type": "object",
+      "required": [
+        "origin_instance_id",
+        "started_at",
+        "build_sha256",
+        "config_sha256",
+        "configured_max_incoming_streams",
+        "effective_max_incoming_streams"
+      ],
+      "properties": {
+        "origin_instance_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "started_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "build_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "configured_max_incoming_streams": {"type": "integer", "minimum": 1},
+        "effective_max_incoming_streams": {"type": "integer", "minimum": 1},
+        "counter_epoch": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": true
+    },
+    "counters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "phase",
+          "route",
+          "protocol",
+          "method",
+          "role",
+          "handler_requests",
+          "h3_attempts",
+          "h3_request_rejections"
+        ],
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            ]
+          },
+          "phase": {"enum": ["main", "unmarked"]},
+          "route": {"enum": ["bench", "large", "files", "other"]},
+          "protocol": {"enum": ["h1", "h2", "h3"]},
+          "method": {"enum": ["HEAD", "GET", "other"]},
+          "role": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "enum": [
+                  "initial",
+                  "optimization_fallback",
+                  "engine_retry",
+                  "engine_retry_optimization_fallback"
+                ]
+              }
+            ]
+          },
+          "handler_requests": {"type": "integer", "minimum": 0},
+          "h3_attempts": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "integer", "minimum": 0}
+            ]
+          },
+          "h3_request_rejections": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "integer", "minimum": 0}
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

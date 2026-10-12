@@ -1,0 +1,6 @@
+Ip: Forwarding DefaultTTL InReceives InHdrErrors
+Ip: 2 64 1000 0
+Udp: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors InCsumErrors IgnoredMulti MemErrors
+Udp: 100 2 3 95 4 5 6 7 8
+UdpLite: InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors InCsumErrors IgnoredMulti MemErrors
+UdpLite: 0 0 0 0 0 0 0 0 0

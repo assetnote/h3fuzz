@@ -1,0 +1,74 @@
+on: [push, pull_request]
+
+permissions: read-all
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu", "windows", "macos" ]
+        go: [ "1.26.x", "1.27.x" ]
+    runs-on: ${{ fromJSON(vars[format('UNIT_RUNNER_{0}', matrix.os)] || format('"{0}-latest"', matrix.os)) }}
+    name: Unit tests (${{ matrix.os}}, Go ${{ matrix.go }})
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+      - run: go version
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@v2.1.0
+      - name: Remove integrationtests
+        shell: bash
+        run: git rm -r --cached integrationtests && rm -rf integrationtests
+      - name: Run tests
+        env:
+          TIMESCALE_FACTOR: 10
+        run: go test -v -shuffle on -cover -coverprofile coverage.txt ./... 2>&1 | go-junit-report -set-exit-code -iocopy -out report.xml
+      - name: Run tests as root
+        if: ${{ matrix.os == 'ubuntu' }}
+        env:
+          TIMESCALE_FACTOR: 10
+          FILE: sys_conn_helper_linux_test.go
+        run: |
+          test -f $FILE # make sure the file actually exists
+          TEST_NAMES=$(grep '^func Test' "$FILE" | sed 's/^func \([A-Za-z0-9_]*\)(.*/\1/' | tr '\n' '|')
+          go test -c -cover -tags root -o quic-go.test .
+          sudo ./quic-go.test -test.v -test.run "${TEST_NAMES%|}" -test.coverprofile coverage-root.txt 2>&1 | go-junit-report -set-exit-code -iocopy -package-name github.com/quic-go/quic-go -out report_root.xml
+          rm quic-go.test
+      - name: Run tests with race detector
+        if: ${{ matrix.os == 'ubuntu' }} # speed things up. Windows and OSX VMs are slow
+        env:
+          TIMESCALE_FACTOR: 20
+        run: go test -v -shuffle on ./...
+      - name: Run handshake tests in FIPS140 mode
+        env:
+          GODEBUG: fips140=only
+        run: go test -v ./internal/handshake -run 'TestToken|TestRetry|TestInitial|TestDecode|TestEncrypt'
+      - name: Run benchmark tests
+        run: go test -v -run=^$ -benchtime 0.5s -bench=. ./...
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        env:
+          OS: ${{ matrix.os }}
+          GO: ${{ matrix.go }}
+        with:
+          files: coverage.txt,coverage-root.txt
+          env_vars: OS,GO
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test report to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        env:
+          OS: ${{ matrix.os }}
+          GO: ${{ matrix.go }}
+        with:
+          report_type: test_results
+          name: Unit tests
+          files: report.xml,report_root.xml
+          env_vars: OS,GO
+          token: ${{ secrets.CODECOV_TOKEN }}

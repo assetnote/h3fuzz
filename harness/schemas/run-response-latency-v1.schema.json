@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/run-response-latency-v1.schema.json",
+  "title": "h3fuzz main-response latency telemetry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "scope",
+    "clock",
+    "unit",
+    "method",
+    "sample_count",
+    "p99_upper_bound_ns",
+    "maximum_trackable_ns",
+    "overflow_count"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source": {"const": "client_final_attempt_time_to_first_byte"},
+    "scope": {"const": "main_successful_logical_responses"},
+    "clock": {"const": "monotonic"},
+    "unit": {"const": "nanoseconds"},
+    "method": {"const": "bounded_histogram_upper_bound"},
+    "sample_count": {"type": "integer", "minimum": 0},
+    "p99_upper_bound_ns": {"type": "integer", "minimum": 0},
+    "maximum_trackable_ns": {"type": "integer", "minimum": 1},
+    "overflow_count": {"type": "integer", "minimum": 0}
+  }
+}

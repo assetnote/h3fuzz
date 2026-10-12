@@ -1,0 +1,16 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Pinned upstream quic-go source, including public test keys"
+paths = [
+  '''^third_party/quic-go/''',
+]
+
+[[allowlists]]
+description = "Non-secret storage and telemetry schema identifiers"
+regexTarget = "secret"
+regexes = [
+  '''^h3fuzz\.throughput\.collapsed$''',
+  '''^p99_latency_ms_provenance$''',
+]

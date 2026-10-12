@@ -1,0 +1,151 @@
+(h3fuzz_routes) {
+	tls internal
+
+	route {
+		header {
+			Cache-Control "no-store"
+			X-H3-Harness-Protocol "{http.request.proto}"
+		}
+
+		# Small protocol-identifying response used by fingerprints and smoke tests.
+		handle /healthz {
+			respond "{http.request.proto}\n" 200
+		}
+
+		# Transport ceiling: no body and no filesystem lookup. Benchmark clients
+		# filter status 204 so result rendering cannot become the bottleneck.
+		handle /bench/* {
+			respond "" 204
+		}
+
+		# A successful but dishonest HEAD implementation: every path exists.
+		@head_constant {
+			path /matrix/head-constant/*
+			method HEAD
+		}
+		respond @head_constant "" 200
+
+		# A common alternative failure mode: HEAD is blocked, Range remains valid.
+		@head_blocked {
+			path /matrix/head-405/*
+			method HEAD
+		}
+		respond @head_blocked "" 405
+
+		# The baseline directory and random misses implement HEAD correctly, so the
+		# detector selects HEAD. Only one real candidate rejects it. This proves the
+		# live unseen-status guard retries that candidate with an untouched GET.
+		@runtime_head_rejected {
+			path /matrix/runtime-head-reject/runtime-fallback.txt
+			method HEAD
+		}
+		respond @runtime_head_rejected "" 405
+
+		# Force qualification through Range for this prefix, then reject Range only
+		# on one real candidate. The baseline Range hit and both misses remain honest.
+		@runtime_range_head_blocked {
+			path /matrix/runtime-range-reject/*
+			method HEAD
+		}
+		respond @runtime_range_head_blocked "" 405
+
+		@runtime_range_rejected {
+			path /matrix/runtime-range-reject/runtime-fallback.txt
+			header Range *
+		}
+		respond @runtime_range_rejected "" 400
+
+		# Force the detector past HEAD so the Range-ignore and Range-lie cases
+		# actually exercise (and reject) their adversarial Range behavior.
+		@range_adversarial_head {
+			path /matrix/range-ignore/* /matrix/range-lie/*
+			method HEAD
+		}
+		respond @range_adversarial_head "" 405
+
+		# A dishonest Range implementation. It returns a plausible one-byte 206
+		# for both existing and missing paths, so a single happy-path probe is not
+		# enough to declare Range reliable.
+		@range_lie {
+			path /matrix/range-lie/*
+			header Range *
+		}
+		header @range_lie {
+			Content-Range "bytes 0-0/1048576"
+			Content-Length "1"
+		}
+		respond @range_lie "x" 206
+
+		# These origins ignore Range and return the complete representation.
+		@range_ignored {
+			path /matrix/range-ignore/*
+			header Range *
+		}
+		request_header @range_ignored -Range
+
+		@neither_head {
+			path /matrix/neither/*
+			method HEAD
+		}
+		respond @neither_head "" 200
+
+		@neither_range {
+			path /matrix/neither/*
+			header Range *
+		}
+		request_header @neither_range -Range
+
+		handle_path /matrix/good/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/head-constant/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/head-405/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/runtime-head-reject/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/runtime-range-reject/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/range-ignore/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/range-lie/* {
+			root * /srv
+			file_server
+		}
+		handle_path /matrix/neither/* {
+			root * /srv
+			file_server
+		}
+
+		# Realistic discovery path. Most words miss; seeded final.txt entries hit.
+		handle_path /files/* {
+			root * /srv
+			file_server
+		}
+
+		# Every word resolves to a 1 MiB representation, making the effect of
+		# HEAD and Range visible without changing the HTTP/3 transport.
+		handle_path /large/* {
+			rewrite * /known-large.bin
+			root * /srv
+			file_server
+		}
+
+		respond "not found\n" 404
+	}
+}
+
+localhost:8443, localhost:8444, localhost:8445, localhost:8446 {
+	import h3fuzz_routes
+}

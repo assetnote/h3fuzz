@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "assets": {
+    "final.txt@sha256:1335d7ff3a5624bc2941b3fa0a42bb5eada5b4ea42b10d3b061aeeb1a4289af7": {
+      "path": "final.txt",
+      "sha256": "1335d7ff3a5624bc2941b3fa0a42bb5eada5b4ea42b10d3b061aeeb1a4289af7",
+      "declaredLicense": "Apache-2.0 AND MIT",
+      "sourceArtifact": "https://wordlists-cdn.assetnote.io/data/manual/raft-large-words.txt",
+      "sourceSha256": "0d51eae9b3a8dd56cbba37a42c8baa3b1c4b811319c8c5e0628c35db585fdae6",
+      "licenseFiles": [
+        {
+          "path": "assetnote-wordlists-Apache-2.0.txt",
+          "source": "https://github.com/assetnote/wordlists/blob/6dea231f4cbd356a637851b1c13b83de4da00adb/LICENSE",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "stripFinalLF": true
+        },
+        {
+          "path": "seclists-MIT.txt",
+          "source": "https://github.com/danielmiessler/SecLists/blob/7648881d16551b724962b9d047a31e8c64bc23f3/LICENSE",
+          "sha256": "3dbdc93d5f8829de0941744841730a09c106d0732e5ae0e98ca1d77be7ded66c"
+        }
+      ]
+    }
+  },
+  "packages": {
+    "react-remove-scroll-bar@2.3.8": {
+      "declaredLicense": "MIT",
+      "reason": "The published npm package and README declare MIT, but its files allowlist omits the repository LICENSE. The text is pinned to the commit that added the repository's canonical LICENSE file.",
+      "licenseFiles": [
+        {
+          "path": "react-remove-scroll-bar-2.3.8-MIT.txt",
+          "source": "https://github.com/theKashey/react-remove-scroll-bar/blob/7301c160fda44cb8cf2b9fdfde61efad35736196/LICENSE",
+          "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84"
+        }
+      ]
+    },
+    "victory-vendor@37.3.6": {
+      "declaredLicense": "MIT AND ISC",
+      "reason": "The published npm package declares MIT AND ISC but omits its root project license. Its vendored D3 license files remain present under lib-vendor and are included separately.",
+      "licenseFiles": [
+        {
+          "path": "victory-vendor-37.3.6-MIT.txt",
+          "source": "https://github.com/FormidableLabs/victory/blob/v37.3.6/LICENSE.txt",
+          "sha256": "34dee5fd5e5cc756efb5ad4d64652bce719bdf5e900ca5d7538253e737930bc4",
+          "stripFinalLF": true
+        }
+      ],
+      "nestedNoticeDirectories": [
+        "lib-vendor"
+      ]
+    }
+  }
+}

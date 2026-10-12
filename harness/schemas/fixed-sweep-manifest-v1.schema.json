@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/fixed-sweep-manifest-v1.schema.json",
+  "title": "h3fuzz PERF-501 fixed-sweep manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_type",
+    "created_at",
+    "eligible",
+    "ineligible_reasons",
+    "trials_per_point",
+    "candidate_connections",
+    "candidate_streams",
+    "candidate_matrix",
+    "decision_policy",
+    "decision_policy_reference",
+    "wordlist_manifest_reference",
+    "wordlist_sha256",
+    "platform_key",
+    "client_build_key",
+    "workload_key",
+    "authority",
+    "server_identity",
+    "points",
+    "selection",
+    "selected_point",
+    "adaptive_max_connections",
+    "adaptive_max_workers",
+    "members",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_type": {"const": "h3fuzz-fixed-sweep"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "eligible": {"type": "boolean"},
+    "ineligible_reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "trials_per_point": {"const": 3},
+    "candidate_connections": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1, "maximum": 256}
+    },
+    "candidate_streams": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "candidate_matrix": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/executedPoint"},
+          {"$ref": "#/$defs/skippedPoint"}
+        ]
+      }
+    },
+    "decision_policy": {"$ref": "decision-policy-v1.schema.json"},
+    "decision_policy_reference": {"$ref": "#/$defs/artifact"},
+    "wordlist_manifest_reference": {"$ref": "#/$defs/artifact"},
+    "wordlist_sha256": {"$ref": "#/$defs/sha256"},
+    "platform_key": {"$ref": "#/$defs/nullableSha256"},
+    "client_build_key": {"$ref": "#/$defs/nullableSha256"},
+    "workload_key": {"$ref": "#/$defs/nullableSha256"},
+    "authority": {"type": ["string", "null"]},
+    "server_identity": {"type": ["string", "null"]},
+    "points": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/selectablePoint"}
+    },
+    "selection": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/selection"}]},
+    "selected_point": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/selectedPoint"}]},
+    "adaptive_max_connections": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 256
+    },
+    "adaptive_max_workers": {"type": "integer", "minimum": 1},
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/member"}
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"eligible": {"const": true}}},
+      "then": {
+        "properties": {
+          "ineligible_reasons": {"maxItems": 0},
+          "platform_key": {"$ref": "#/$defs/sha256"},
+          "client_build_key": {"$ref": "#/$defs/sha256"},
+          "workload_key": {"$ref": "#/$defs/sha256"},
+          "authority": {"type": "string", "minLength": 1},
+          "server_identity": {"type": "string", "minLength": 1},
+          "points": {"minItems": 1},
+          "selection": {"$ref": "#/$defs/selection"},
+          "selected_point": {"$ref": "#/$defs/selectedPoint"},
+          "adaptive_max_connections": {"type": "integer", "minimum": 1, "maximum": 256}
+        }
+      },
+      "else": {
+        "properties": {
+          "ineligible_reasons": {"minItems": 1},
+          "selected_point": {"type": "null"},
+          "adaptive_max_connections": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullableSha256": {
+      "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/portablePath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": {"$ref": "#/$defs/portablePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "resourceMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples", "median", "maximum", "limit", "exceeded"],
+      "properties": {
+        "samples": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "number", "minimum": 0}
+        },
+        "median": {"type": "number", "minimum": 0},
+        "maximum": {"type": "number", "minimum": 0},
+        "limit": {"type": "number", "exclusiveMinimum": 0},
+        "exceeded": {"type": "boolean"}
+      }
+    },
+    "resourceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_cpu_percent",
+        "server_cpu_percent",
+        "network_utilization_percent",
+        "p99_latency_ms"
+      ],
+      "properties": {
+        "client_cpu_percent": {"$ref": "#/$defs/resourceMetric"},
+        "server_cpu_percent": {"$ref": "#/$defs/resourceMetric"},
+        "network_utilization_percent": {"$ref": "#/$defs/resourceMetric"},
+        "p99_latency_ms": {"$ref": "#/$defs/resourceMetric"}
+      }
+    },
+    "executedPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connections",
+        "streams",
+        "status",
+        "classification",
+        "reports",
+        "trial_completed_response_rps",
+        "median_completed_response_rps",
+        "run_eligibility",
+        "run_ineligible_reasons",
+        "clean",
+        "selection_eligible",
+        "ineligible_reasons",
+        "resource_summary",
+        "resource_limits_exceeded",
+        "prior_best_completed_response_rps",
+        "improvement_percent_vs_prior_best",
+        "minimum_improvement_percent",
+        "treatment_key",
+        "cohort_key",
+        "platform_key",
+        "client_build_key",
+        "workload_key",
+        "authority",
+        "server_identity"
+      ],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+        "streams": {"type": "integer", "minimum": 1},
+        "status": {"const": "executed"},
+        "classification": {
+          "enum": ["initial", "improved", "improved_with_resource_override", "plateau", "worsened", "ineligible"]
+        },
+        "reports": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/artifact"}
+        },
+        "trial_completed_response_rps": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "number", "exclusiveMinimum": 0}
+        },
+        "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "run_eligibility": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "boolean"}
+        },
+        "run_ineligible_reasons": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        },
+        "clean": {"type": "boolean"},
+        "selection_eligible": {"type": "boolean"},
+        "ineligible_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "resource_summary": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/resourceSummary"}]},
+        "resource_limits_exceeded": {"type": "array", "uniqueItems": true, "items": {"enum": ["client_cpu_percent", "server_cpu_percent", "network_utilization_percent", "p99_latency_ms"]}},
+        "prior_best_completed_response_rps": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "improvement_percent_vs_prior_best": {"type": ["number", "null"]},
+        "minimum_improvement_percent": {"type": "number", "minimum": 3},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"},
+        "platform_key": {"$ref": "#/$defs/sha256"},
+        "client_build_key": {"$ref": "#/$defs/sha256"},
+        "workload_key": {"$ref": "#/$defs/sha256"},
+        "authority": {"type": "string", "minLength": 1},
+        "server_identity": {"type": "string", "minLength": 1}
+      }
+    },
+    "skippedPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "status", "skipped_reasons"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+        "streams": {"type": "integer", "minimum": 1},
+        "status": {"const": "skipped"},
+        "skipped_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "skipped_after": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connections", "streams", "classification"],
+          "properties": {
+            "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+            "streams": {"type": "integer", "minimum": 1},
+            "classification": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "selectablePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "treatment_key", "cohort_key", "clean", "median_completed_response_rps", "reports"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+        "streams": {"type": "integer", "minimum": 1},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"},
+        "clean": {"const": true},
+        "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "reports": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/artifact"}
+        }
+      }
+    },
+    "nearBestPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "median_completed_response_rps", "gap_from_best_percent", "connections_times_streams", "treatment_key", "cohort_key"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+        "streams": {"type": "integer", "minimum": 1},
+        "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "gap_from_best_percent": {"type": "number", "minimum": 0},
+        "connections_times_streams": {"type": "integer", "minimum": 1},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["best_median_completed_response_rps", "near_best_threshold_percent", "inclusive_near_best_formula", "near_best", "total_order", "chosen"],
+      "properties": {
+        "best_median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "near_best_threshold_percent": {"type": "number", "minimum": 3},
+        "inclusive_near_best_formula": {"const": "100 * (M_best - M_i) / M_best <= T"},
+        "near_best": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nearBestPoint"}},
+        "total_order": {"const": ["connections_times_streams", "connections", "streams"]},
+        "chosen": {"$ref": "#/$defs/nearBestPoint"}
+      }
+    },
+    "selectedPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "median_completed_response_rps", "gap_from_best_percent", "connections_times_streams", "treatment_key", "cohort_key"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1, "maximum": 256},
+        "streams": {"type": "integer", "minimum": 1},
+        "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "gap_from_best_percent": {"type": "number", "minimum": 0},
+        "connections_times_streams": {"type": "integer", "minimum": 1},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

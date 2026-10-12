@@ -1,0 +1,231 @@
+package output
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/assetnote/h3fuzz/pkg/ffuf"
+	"github.com/assetnote/h3fuzz/pkg/filter"
+)
+
+// captureStdout redirects os.Stdout to an in-memory pipe for the duration of
+// fn and returns everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	return captureStream(t, &os.Stdout, fn)
+}
+
+// captureStderr is the os.Stderr equivalent of captureStdout.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	return captureStream(t, &os.Stderr, fn)
+}
+
+// captureStream drains the read end while fn runs. Reading only after fn returns
+// deadlocks once fn writes more than the pipe buffer holds.
+func captureStream(t *testing.T, stream **os.File, fn func()) string {
+	t.Helper()
+	orig := *stream
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %s", err)
+	}
+	*stream = w
+	defer func() { *stream = orig }()
+
+	type capture struct {
+		out string
+		err error
+	}
+	done := make(chan capture, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, r)
+		done <- capture{buf.String(), err}
+	}()
+
+	fn()
+
+	w.Close()
+	c := <-done
+	r.Close()
+	if c.err != nil {
+		t.Fatalf("failed to read captured output: %s", c.err)
+	}
+	return c.out
+}
+
+func TestBannerReportsNegotiatedTCPProtocol(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		conf ffuf.Config
+		want string
+		not  string
+	}{
+		{
+			name: "requested HTTP2 fell back to HTTP1",
+			conf: ffuf.Config{Http2: true, Http2Selected: false},
+			want: "HTTP/1.1",
+			not:  "HTTP/2",
+		},
+		{
+			name: "HTTP2 negotiated automatically",
+			conf: ffuf.Config{Http2Selected: true},
+			want: "HTTP/2",
+			not:  "HTTP/1.1",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.conf.MatcherManager = filter.NewMatcherManager()
+			outp := NewStdoutput(&test.conf)
+			got := captureStderr(t, outp.Banner)
+			if !strings.Contains(got, test.want) || strings.Contains(got, test.not) {
+				t.Fatalf("banner protocol output = %q, want %q and not %q", got, test.want, test.not)
+			}
+		})
+	}
+}
+
+func TestBannerUsesH3fuzzBranding(t *testing.T) {
+	conf := ffuf.Config{}
+	conf.MatcherManager = filter.NewMatcherManager()
+	outp := NewStdoutput(&conf)
+	got := captureStderr(t, outp.Banner)
+	if !strings.Contains(got, "h3fuzz") || !strings.Contains(got, "HTTP/3 content discovery") {
+		t.Fatalf("banner = %q, want h3fuzz product branding", got)
+	}
+}
+
+func TestResultOutputOmitsControlCharsWhenStdoutIsNotATerminal(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	// A pipe (as used by captureStdout, and as ffuf sees when its stdout is
+	// redirected to a file with `>`) is never a terminal.
+	outp.stdoutIsTerminal = false
+
+	res := ffuf.Result{StatusCode: 200, ContentLength: 42, ContentWords: 3, ContentLines: 1}
+
+	out := captureStdout(t, func() {
+		outp.PrintResult(res)
+	})
+
+	if strings.Contains(out, TERMINAL_CLEAR_LINE) {
+		t.Errorf("result line written to a non-terminal stdout still contains the terminal clear-line sequence: %q", out)
+	}
+}
+
+func TestResultOutputKeepsControlCharsOnATerminal(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	// Simulate stdout being an interactive terminal, which is when the
+	// progress-bar-clearing sequence is actually needed.
+	outp.stdoutIsTerminal = true
+
+	res := ffuf.Result{StatusCode: 200, ContentLength: 42, ContentWords: 3, ContentLines: 1}
+
+	out := captureStdout(t, func() {
+		outp.PrintResult(res)
+	})
+
+	if !strings.Contains(out, TERMINAL_CLEAR_LINE) {
+		t.Errorf("result line written to a terminal stdout is missing the terminal clear-line sequence: %q", out)
+	}
+}
+
+func TestErrorOutputOmitsControlCharsWhenStderrIsNotATerminal(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	outp.stderrIsTerminal = false
+
+	out := captureStderr(t, func() {
+		outp.Error("something broke")
+	})
+
+	if strings.Contains(out, TERMINAL_CLEAR_LINE) {
+		t.Errorf("Error() written to a non-terminal stderr still contains the terminal clear-line sequence: %q", out)
+	}
+}
+
+func TestErrorOutputKeepsControlCharsOnATerminal(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	outp.stderrIsTerminal = true
+
+	out := captureStderr(t, func() {
+		outp.Error("something broke")
+	})
+
+	if !strings.Contains(out, TERMINAL_CLEAR_LINE) {
+		t.Errorf("Error() written to a terminal stderr is missing the terminal clear-line sequence: %q", out)
+	}
+}
+
+func TestProgressOutputOmitsControlCharsWhenStderrIsNotATerminal(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	outp.stderrIsTerminal = false
+
+	out := captureStderr(t, func() {
+		outp.Progress(ffuf.Progress{StartedAt: time.Now()})
+	})
+
+	if strings.Contains(out, TERMINAL_CLEAR_LINE) {
+		t.Errorf("Progress() written to a non-terminal stderr still contains the terminal clear-line sequence: %q", out)
+	}
+}
+
+func TestProgressOutputShowsMeasuredRateDuringFirstSecond(t *testing.T) {
+	conf := &ffuf.Config{}
+	outp := NewStdoutput(conf)
+	outp.stderrIsTerminal = false
+
+	out := captureStderr(t, func() {
+		outp.Progress(ffuf.Progress{StartedAt: time.Now(), ReqSec: 12_345})
+	})
+
+	if !strings.Contains(out, "12345 req/sec") {
+		t.Fatalf("first-second progress hid the measured rate: %q", out)
+	}
+}
+
+func TestResultOutputOmitsColorResetWhenColorsAreDisabled(t *testing.T) {
+	if ANSI_CLEAR == "" {
+		t.Skip("this build emits no ANSI escapes, so there is no reset code to look for")
+	}
+	conf := &ffuf.Config{Colors: false}
+	outp := NewStdoutput(conf)
+	outp.stdoutIsTerminal = true // isolate this from the clear-line behavior above
+
+	res := ffuf.Result{StatusCode: 200, ContentLength: 42, ContentWords: 3, ContentLines: 1}
+
+	out := captureStdout(t, func() {
+		outp.PrintResult(res)
+	})
+
+	if strings.Contains(out, ANSI_CLEAR) {
+		t.Errorf("result line printed without -c still carries an ANSI reset code: %q", out)
+	}
+}
+
+func TestResultOutputKeepsColorResetWhenColorsAreEnabled(t *testing.T) {
+	if ANSI_CLEAR == "" {
+		t.Skip("this build emits no ANSI escapes, so there is no reset code to look for")
+	}
+	conf := &ffuf.Config{Colors: true}
+	outp := NewStdoutput(conf)
+	outp.stdoutIsTerminal = false // -c output is opt-in and shouldn't depend on terminal detection
+
+	res := ffuf.Result{StatusCode: 200, ContentLength: 42, ContentWords: 3, ContentLines: 1}
+
+	out := captureStdout(t, func() {
+		outp.PrintResult(res)
+	})
+
+	if !strings.Contains(out, ANSI_CLEAR) {
+		t.Errorf("result line printed with -c is missing its ANSI reset code: %q", out)
+	}
+}

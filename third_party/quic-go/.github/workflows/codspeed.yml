@@ -1,0 +1,30 @@
+name: Benchmarks
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  benchmarks:
+    name: Benchmarks
+    runs-on: codspeed-macro
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+          check-latest: true
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: walltime
+          run: go test -run=^$ -bench=. ./integrationtests/self

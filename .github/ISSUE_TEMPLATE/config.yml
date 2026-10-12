@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation and usage
+    url: https://github.com/assetnote/h3fuzz/blob/main/docs/README.md
+    about: Read the operator, protocol, performance, and harness documentation before opening an issue.
+  - name: Security reporting policy
+    url: https://github.com/assetnote/h3fuzz/blob/main/SECURITY.md
+    about: Follow the private reporting instructions. Do not disclose security issues in a public issue.

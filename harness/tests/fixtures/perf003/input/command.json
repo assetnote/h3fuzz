@@ -1,0 +1,7 @@
+[
+  "/opt/h3fuzz/h3fuzz",
+  "-u",
+  "https://origin.example:8443/bench/FUZZ",
+  "--api-token",
+  "super-secret"
+]

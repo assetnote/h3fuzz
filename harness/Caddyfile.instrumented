@@ -1,0 +1,22 @@
+{
+	admin {$H3FUZZ_ADMIN_ADDR:0.0.0.0:2019}
+	persist_config off
+	auto_https disable_redirects
+	skip_install_trust
+	metrics
+
+	servers :8443 {
+		protocols h1 h2 h3
+	}
+	servers :8444 {
+		protocols h1 h2
+	}
+	servers :8445 {
+		protocols h1 h2 h3
+	}
+	servers :8446 {
+		protocols h3
+	}
+}
+
+import /etc/caddy/harness-routes.caddy

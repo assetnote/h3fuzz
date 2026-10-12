@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/diagnostics-manifest-v1.schema.json",
+  "title": "h3fuzz PERF-503 paired diagnostics manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_type",
+    "created_at",
+    "eligible",
+    "ineligible_reasons",
+    "platform_key",
+    "client_build_key",
+    "workload_key",
+    "authority",
+    "server_identity",
+    "selected_point",
+    "adaptive_max_workers",
+    "wordlist",
+    "ceiling_reference",
+    "profiles",
+    "members",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_type": {"const": "h3fuzz-diagnostics"},
+    "created_at": {"type": "string", "minLength": 1},
+    "eligible": {"const": true},
+    "ineligible_reasons": {"type": "array", "maxItems": 0},
+    "platform_key": {"$ref": "#/$defs/sha256"},
+    "client_build_key": {"$ref": "#/$defs/sha256"},
+    "workload_key": {"$ref": "#/$defs/sha256"},
+    "authority": {"type": "string", "minLength": 1},
+    "server_identity": {"type": "string", "minLength": 1},
+    "selected_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "treatment_key", "cohort_key"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1},
+        "streams": {"type": "integer", "minimum": 1},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "adaptive_max_workers": {"type": "integer", "minimum": 1},
+    "wordlist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "line_count", "manifest_sha256"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "line_count": {"type": "integer", "minimum": 1},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "ceiling_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "selected_treatment_key", "selected_cohort_key"],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "selected_treatment_key": {"$ref": "#/$defs/sha256"},
+        "selected_cohort_key": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "heap", "mutex", "block", "quic"],
+      "properties": {
+        "cpu": {"$ref": "#/$defs/pair"},
+        "heap": {"$ref": "#/$defs/pair"},
+        "mutex": {"$ref": "#/$defs/pair"},
+        "block": {"$ref": "#/$defs/pair"},
+        "quic": {"$ref": "#/$defs/pair"}
+      }
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/member"}
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "overhead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control_rps", "profile_rps", "rps_delta", "overhead_percent"],
+      "properties": {
+        "control_rps": {"type": "number", "exclusiveMinimum": 0},
+        "profile_rps": {"type": "number", "exclusiveMinimum": 0},
+        "rps_delta": {"type": "number"},
+        "overhead_percent": {"type": "number"}
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paired_control",
+        "profile_flags",
+        "control_profile_flags",
+        "profile_run_id",
+        "control_run_id",
+        "profile_treatment_key",
+        "control_treatment_key",
+        "profile_report",
+        "control_report",
+        "profile_artifact",
+        "shared_keys_match",
+        "source_eligibility_runs",
+        "overhead"
+      ],
+      "properties": {
+        "paired_control": {"const": true},
+        "profile_flags": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"enum": ["cpu", "heap", "mutex", "block", "quic"]}
+        },
+        "control_profile_flags": {"type": "array", "maxItems": 0},
+        "profile_run_id": {"$ref": "#/$defs/uuid"},
+        "control_run_id": {"$ref": "#/$defs/uuid"},
+        "profile_treatment_key": {"$ref": "#/$defs/sha256"},
+        "control_treatment_key": {"$ref": "#/$defs/sha256"},
+        "profile_report": {"$ref": "#/$defs/artifact"},
+        "control_report": {"$ref": "#/$defs/artifact"},
+        "profile_artifact": {"$ref": "#/$defs/artifact"},
+        "shared_keys_match": {"const": true},
+        "source_eligibility_runs": {"const": false},
+        "overhead": {"$ref": "#/$defs/overhead"}
+      }
+    }
+  }
+}

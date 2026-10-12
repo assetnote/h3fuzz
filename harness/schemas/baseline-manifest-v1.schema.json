@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/baseline-manifest-v1.schema.json",
+  "title": "h3fuzz immutable B0/B1 baseline manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_type",
+    "baseline",
+    "created_at",
+    "run_count",
+    "reports",
+    "control_window_rates",
+    "median_completed_response_rps",
+    "median_absolute_deviation_completed_response_rps",
+    "minimum_completed_response_rps",
+    "maximum_completed_response_rps",
+    "standard_deviation_completed_response_rps",
+    "noise_band_percent",
+    "noise_band_formula",
+    "minimum_improvement_percent",
+    "platform_key",
+    "client_build_key",
+    "workload_key",
+    "treatment_key",
+    "cohort_key",
+    "eligible",
+    "ineligible_reasons",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_type": {"const": "h3fuzz-baseline"},
+    "baseline": {"enum": ["B0", "B1"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "run_count": {"type": "integer", "minimum": 5},
+    "reports": {
+      "type": "array",
+      "minItems": 5,
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "control_window_rates": {
+      "type": "array",
+      "minItems": 5,
+      "items": {"type": "number", "exclusiveMinimum": 0}
+    },
+    "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+    "median_absolute_deviation_completed_response_rps": {"type": "number", "minimum": 0},
+    "minimum_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+    "maximum_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+    "standard_deviation_completed_response_rps": {"type": "number", "minimum": 0},
+    "noise_band_percent": {"type": "number", "minimum": 0},
+    "noise_band_formula": {
+      "const": "100 * 1.4826 * MAD(completed_response_rps) / median(completed_response_rps)"
+    },
+    "minimum_improvement_percent": {"type": "number", "minimum": 3},
+    "platform_key": {"$ref": "#/$defs/sha256"},
+    "client_build_key": {"$ref": "#/$defs/sha256"},
+    "workload_key": {"$ref": "#/$defs/sha256"},
+    "treatment_key": {"$ref": "#/$defs/sha256"},
+    "cohort_key": {"$ref": "#/$defs/sha256"},
+    "eligible": {"const": true},
+    "ineligible_reasons": {"type": "array", "maxItems": 0},
+    "retained_b0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "noise_band_percent", "minimum_improvement_percent"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "noise_band_percent": {"type": "number", "minimum": 0},
+        "minimum_improvement_percent": {"type": "number", "minimum": 3}
+      }
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"baseline": {"const": "B1"}}},
+      "then": {"required": ["retained_b0"]},
+      "else": {"not": {"required": ["retained_b0"]}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

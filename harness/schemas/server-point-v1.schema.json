@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetnote.invalid/h3fuzz/schemas/server-point-v1.schema.json",
+  "title": "h3fuzz PERF-003 server point evidence",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "phase",
+    "run_id",
+    "captured_at",
+    "host_identity_sha256",
+    "boot_id",
+    "network_namespace_inode",
+    "udp_counters",
+    "interfaces",
+    "processes",
+    "sockets"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "server_point"},
+    "phase": {"enum": ["before", "after"]},
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "captured_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "host_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "network_namespace_inode": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "udp_counters": {
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["source", "name", "value", "width_bits"],
+            "properties": {
+              "source": {"const": "/proc/net/snmp:Udp"},
+              "name": {"type": "string", "minLength": 1},
+              "value": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "width_bits": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "interfaces": {
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "ifindex", "name", "link_speed_bits_per_second", "rx_bytes", "tx_bytes",
+              "rx_dropped", "tx_dropped", "rx_errors", "tx_errors", "counter_width_bits", "source"
+            ],
+            "properties": {
+              "ifindex": {"type": "integer", "minimum": 1},
+              "name": {"type": "string", "minLength": 1},
+              "link_speed_bits_per_second": {
+                "anyOf": [
+                  {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+                  {"type": "null"}
+                ]
+              },
+              "rx_bytes": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "tx_bytes": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "rx_dropped": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "tx_dropped": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "rx_errors": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "tx_errors": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "counter_width_bits": {"type": "integer", "minimum": 1},
+              "source": {"enum": ["sysfs", "netlink"]}
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "processes": {
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "role", "pid", "start_ticks", "affinity_cpus", "cpu_time_ns",
+              "cgroup_path_sha256", "cgroup_cpu_throttled_ns"
+            ],
+            "properties": {
+              "role": {"const": "origin"},
+              "pid": {"type": "integer", "minimum": 1},
+              "start_ticks": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "affinity_cpus": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "integer", "minimum": 0}
+              },
+              "cpu_time_ns": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "cgroup_path_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "cgroup_cpu_throttled_ns": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"}
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "sockets": {
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "role", "pid", "inode", "local_address", "raw_so_rcvbuf_bytes",
+              "raw_so_sndbuf_bytes", "source", "linux_kernel_doubling_applies"
+            ],
+            "properties": {
+              "role": {"const": "origin"},
+              "pid": {"type": "integer", "minimum": 1},
+              "inode": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+              "local_address": {"type": "string", "minLength": 1},
+              "raw_so_rcvbuf_bytes": {"type": "integer", "minimum": 0},
+              "raw_so_sndbuf_bytes": {"type": "integer", "minimum": 0},
+              "operator_requested_so_rcvbuf_bytes": {"type": "integer", "minimum": 0},
+              "operator_requested_so_sndbuf_bytes": {"type": "integer", "minimum": 0},
+              "source": {"enum": ["getsockopt", "ss"]},
+              "linux_kernel_doubling_applies": {"type": "boolean"}
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    }
+  }
+}

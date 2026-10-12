@@ -1,0 +1,41 @@
+# h3fuzz retains ffuf's TOML format and ~/.ffufrc fallback for compatibility.
+# The default lookup order is the h3fuzz XDG config directory (h3fuzz/ffufrc),
+# then ~/.ffufrc. h3fuzz does not read or write ffuf's XDG state directory.
+# Copy this file to either location, then adjust it for your environment.
+# https://github.com/assetnote/h3fuzz
+
+[http]
+    followredirects = false
+    headers = [
+        "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+    ]
+    method = "GET"
+    timeout = 10
+
+[general]
+    autocalibration = false
+    colors = true
+    noninteractive = false
+    rate = 0
+    threads = 1000
+
+[input]
+    dirsearchcompat = true
+    extensions = "aspx,htm,html,js"
+    ignorewordlistcomments = false
+    inputmode = "pitchfork"
+    wordlists = [
+        "final.txt:FUZZ"
+    ]
+
+[matcher]
+    mode = "or"
+    status = "all"
+
+[filter]
+    mode = "or"
+    status = "404"
+
+[output]
+    outputformat = "json"
+    outputcreateemptyfile = false

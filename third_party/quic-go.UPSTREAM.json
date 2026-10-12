@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "module": "github.com/quic-go/quic-go",
+  "version": "v0.63.0",
+  "upstream": {
+    "vcs": "git",
+    "repository": "https://github.com/quic-go/quic-go",
+    "ref": "refs/tags/v0.63.0",
+    "commit": "9d085cc690f7c96451e8ae5659eb0e64671da47a",
+    "module_sum": "h1:LIFGHI4PFUhhw2dDD1ARHdCff143ffMHwZtbnbuJ78A=",
+    "go_mod_sum": "h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=",
+    "zip_url": "https://proxy.golang.org/github.com/quic-go/quic-go/@v/v0.63.0.zip",
+    "zip_sha256": "3b9ada8f6d517a6889798b761e100cce86d42065acd766d883083c36c34ab394",
+    "license_sha256": "77d0b7b53e8abb84cf4dd3f9945a7fdf27044240d2e8023966a721a9a46fe96e"
+  },
+  "dependencies": {
+    "qpack": {
+      "module": "github.com/quic-go/qpack",
+      "version": "v0.6.0",
+      "module_sum": "h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=",
+      "go_mod_sum": "h1:lUpLKChi8njB4ty2bFLX2x4gzDqXwUpaO1DP9qMDZII="
+    }
+  },
+  "fork": {
+    "path": "third_party/quic-go",
+    "patch": "third_party/quic-go-a42.patch",
+    "patch_sha256": "72fc88948abb88f32b866fc10d8ee6680832b86827ec0c60db6134945d60292f",
+    "changed_files": [
+      "http3/prepared_request_headers.go",
+      "http3/prepared_request_headers_test.go",
+      "http3/request_writer.go"
+    ]
+  }
+}

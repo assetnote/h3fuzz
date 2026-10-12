@@ -1,0 +1,383 @@
+package interactive
+
+import (
+	"bufio"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/assetnote/h3fuzz/pkg/engine"
+	"github.com/assetnote/h3fuzz/pkg/ffuf"
+)
+
+type interactive struct {
+	Job    *engine.Job
+	paused bool
+}
+
+func Handle(job *engine.Job) error {
+	i := interactive{job, false}
+	tty, err := termHandle()
+	if err != nil {
+		return err
+	}
+	defer tty.Close()
+	inreader := bufio.NewScanner(tty)
+	inreader.Split(bufio.ScanLines)
+	for inreader.Scan() {
+		i.handleInput(inreader.Bytes())
+	}
+	return nil
+}
+
+func (i *interactive) handleInput(in []byte) {
+	instr := string(in)
+	args := strings.Split(strings.TrimSpace(instr), " ")
+	if len(args) == 1 && args[0] == "" {
+		// Enter pressed - toggle interactive state
+		i.paused = !i.paused
+		if i.paused {
+			// Suppress live result printing BEFORE pausing dispatch, so inflight
+			// requests completing cannot scroll the banner off screen, then show
+			// the banner immediately (no drain wait).
+			i.Job.Output.SetPaused(true)
+			i.Job.Pause()
+			i.printBanner()
+		} else {
+			i.resumeJob()
+		}
+	} else {
+		switch args[0] {
+		case "?":
+			i.printHelp()
+		case "help":
+			i.printHelp()
+		case "resume":
+			i.paused = false
+			i.resumeJob()
+		case "restart":
+			i.Job.Reset(false)
+			i.paused = false
+			i.Job.Output.SetPaused(false)
+			i.Job.Output.Info("Restarting the current h3fuzz job!")
+			i.Job.Resume()
+		case "show":
+			for _, r := range i.Job.Output.GetCurrentResults() {
+				i.Job.Output.PrintResult(r)
+			}
+		case "savejson":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define the filename")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"savejson\"")
+			} else {
+				err := i.Job.Output.SaveFile(args[1], "json")
+				if err != nil {
+					i.Job.Output.Error(fmt.Sprintf("%s", err))
+				} else {
+					i.Job.Output.Info("Output file successfully saved!")
+				}
+			}
+		case "fc":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value for status code filter, or \"none\" for removing it")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"fc\"")
+			} else {
+				if i.updateFilter("status", args[1], true) {
+					i.Job.Output.Info("New status code filter value set")
+				}
+			}
+		case "afc":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value to append to status code filter")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"afc\"")
+			} else {
+				if i.appendFilter("status", args[1]) {
+					i.Job.Output.Info("New status code filter value set")
+				}
+			}
+		case "fl":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value for line count filter, or \"none\" for removing it")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"fl\"")
+			} else {
+				if i.updateFilter("line", args[1], true) {
+					i.Job.Output.Info("New line count filter value set")
+				}
+			}
+		case "afl":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value to append to line count filter")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"afl\"")
+			} else {
+				if i.appendFilter("line", args[1]) {
+					i.Job.Output.Info("New line count filter value set")
+				}
+			}
+		case "fw":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value for word count filter, or \"none\" for removing it")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"fw\"")
+			} else {
+				if i.updateFilter("word", args[1], true) {
+					i.Job.Output.Info("New word count filter value set")
+				}
+			}
+		case "afw":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value to append to word count filter")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"afw\"")
+			} else {
+				if i.appendFilter("word", args[1]) {
+					i.Job.Output.Info("New word count filter value set")
+				}
+			}
+		case "fs":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value for response size filter, or \"none\" for removing it")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"fs\"")
+			} else {
+				if i.updateFilter("size", args[1], true) {
+					i.Job.Output.Info("New response size filter value set")
+				}
+			}
+		case "afs":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value to append to size filter")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"afs\"")
+			} else {
+				if i.appendFilter("size", args[1]) {
+					i.Job.Output.Info("New response size filter value set")
+				}
+			}
+		case "ft":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value for response time filter, or \"none\" for removing it")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"ft\"")
+			} else {
+				if i.updateFilter("time", args[1], true) {
+					i.Job.Output.Info("New response time filter value set")
+				}
+			}
+		case "aft":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define a value to append to response time filter")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"aft\"")
+			} else {
+				if i.appendFilter("time", args[1]) {
+					i.Job.Output.Info("New response time filter value set")
+				}
+			}
+		case "queueshow":
+			i.printQueue()
+		case "queuedel":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define the index of a queued job to remove. Use \"queueshow\" for listing of jobs.")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"queuedel\"")
+			} else {
+				i.deleteQueue(args[1])
+			}
+		case "queueskip":
+			i.Job.SkipQueue()
+			i.Job.Output.Info("Skipping to the next queued job")
+		case "rate":
+			if len(args) < 2 {
+				i.Job.Output.Error("Please define the new rate")
+			} else if len(args) > 2 {
+				i.Job.Output.Error("Too many arguments for \"rate\"")
+			} else {
+				newrate, err := strconv.Atoi(args[1])
+				if err != nil {
+					i.Job.Output.Error(fmt.Sprintf("Could not adjust rate: %s", err))
+				} else {
+					i.Job.Rate.ChangeRate(newrate)
+				}
+			}
+
+		default:
+			if i.paused {
+				i.Job.Output.Warning(fmt.Sprintf("Unknown command: \"%s\". Enter \"help\" for a list of available commands", args[0]))
+			} else {
+				i.Job.Output.Error("NOPE")
+			}
+		}
+	}
+
+	if i.paused {
+		i.printPrompt()
+	}
+}
+
+// resultProbe rebuilds the minimal Response needed to re-evaluate the active
+// filters against an already-collected result. ContentLines must come from the
+// result's line count, not its length: feeding ContentLength here made an
+// in-console "fl" (line count) filter match against the wrong number.
+func resultProbe(res ffuf.Result) *ffuf.Response {
+	return &ffuf.Response{
+		StatusCode:    res.StatusCode,
+		ContentLines:  res.ContentLines,
+		ContentWords:  res.ContentWords,
+		ContentLength: res.ContentLength,
+	}
+}
+
+func (i *interactive) refreshResults() {
+	filters := i.Job.Config.MatcherManager.GetFilters()
+	// Keep a result only if it survives every active filter. The filtering runs
+	// under the output lock via FilterCurrentResults, so a match arriving mid-
+	// refresh is not dropped (the previous GetCurrentResults/SetCurrentResults
+	// pair had a read-modify-write gap that lost it, and it double-counted a
+	// result once per filter it passed).
+	i.Job.Output.FilterCurrentResults(func(res ffuf.Result) bool {
+		for _, filter := range filters {
+			filterOut, _ := filter.Filter(resultProbe(res))
+			if filterOut {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func responseOptimizationSupportsInteractiveFilter(strategy, name string) bool {
+	if strategy == "" || strings.EqualFold(strategy, "GET") {
+		return true
+	}
+	switch name {
+	case "line", "word", "time":
+		return false
+	default:
+		return true
+	}
+}
+
+func (i *interactive) updateFilter(name, value string, replace bool) bool {
+	if !responseOptimizationSupportsInteractiveFilter(i.Job.Config.ResponseOptimizationStrategy, name) {
+		i.Job.Output.Error(fmt.Sprintf(
+			"Cannot change the %s filter while automatic %s response optimization is active. Restart with -no-response-optimization to use body or timing filters.",
+			name,
+			i.Job.Config.ResponseOptimizationStrategy,
+		))
+		return false
+	}
+	if value == "none" {
+		i.Job.Config.MatcherManager.RemoveFilter(name)
+	} else {
+		_ = i.Job.Config.MatcherManager.AddFilter(name, value, replace)
+	}
+	i.refreshResults()
+	return true
+}
+
+func (i *interactive) appendFilter(name, value string) bool {
+	return i.updateFilter(name, value, false)
+}
+
+func (i *interactive) printQueue() {
+	if len(i.Job.QueuedJobs()) > 0 {
+		i.Job.Output.Raw("Queued jobs:\n")
+		for index, job := range i.Job.QueuedJobs() {
+			postfix := ""
+			if index == 0 {
+				postfix = " (active job)"
+			}
+			i.Job.Output.Raw(fmt.Sprintf(" [%d] : %s%s\n", index, job.Url, postfix))
+		}
+	} else {
+		i.Job.Output.Info("Job queue is empty")
+	}
+}
+
+func (i *interactive) deleteQueue(in string) {
+	index, err := strconv.Atoi(in)
+	if err != nil {
+		i.Job.Output.Warning(fmt.Sprintf("Not a number: %s", in))
+	} else {
+		if index < 0 || index > len(i.Job.QueuedJobs())-1 {
+			i.Job.Output.Warning("No such queued job. Use \"queueshow\" to list the jobs in queue")
+		} else if index == 0 {
+			i.Job.Output.Warning("Cannot delete the currently running job. Use \"queueskip\" to advance to the next one")
+		} else {
+			i.Job.DeleteQueueItem(index)
+			i.Job.Output.Info("Job successfully deleted!")
+		}
+	}
+}
+
+// resumeJob restores live result printing and resumes the job. If any matches
+// arrived while the console was open, it reports the count first so the user
+// knows there are new (recorded but unprinted) findings to inspect with "show".
+func (i *interactive) resumeJob() {
+	if n := i.Job.Output.PendingResults(); n > 0 {
+		i.Job.Output.Info(fmt.Sprintf("%d new match(es) found while paused. Type \"show\" to display them.", n))
+	}
+	i.Job.Output.SetPaused(false)
+	i.Job.Resume()
+}
+
+func (i *interactive) printBanner() {
+	i.Job.Output.Raw("entering interactive mode\ntype \"help\" for a list of commands, or ENTER to resume.\n")
+}
+
+func (i *interactive) printPrompt() {
+	// Surface matches that arrived while paused right in the prompt, so a user
+	// sitting in the console sees findings queuing up.
+	if n := i.Job.Output.PendingResults(); n > 0 {
+		i.Job.Output.Raw(fmt.Sprintf("[%d new] > ", n))
+	} else {
+		i.Job.Output.Raw("> ")
+	}
+}
+
+func (i *interactive) printHelp() {
+	var fc, fl, fs, ft, fw string
+	for name, filter := range i.Job.Config.MatcherManager.GetFilters() {
+		switch name {
+		case "status":
+			fc = "(active: " + filter.Repr() + ")"
+		case "line":
+			fl = "(active: " + filter.Repr() + ")"
+		case "word":
+			fw = "(active: " + filter.Repr() + ")"
+		case "size":
+			fs = "(active: " + filter.Repr() + ")"
+		case "time":
+			ft = "(active: " + filter.Repr() + ")"
+		}
+	}
+	rate := fmt.Sprintf("(active: %d)", i.Job.Rate.CurrentConfiguredRate())
+	help := `
+available commands:
+ afc  [value]             - append to status code filter %s
+ fc   [value]             - (re)configure status code filter %s
+ afl  [value]             - append to line count filter %s
+ fl   [value]             - (re)configure line count filter %s
+ afw  [value]             - append to word count filter %s
+ fw   [value]             - (re)configure word count filter %s
+ afs  [value]             - append to size filter %s
+ fs   [value]             - (re)configure size filter %s
+ aft  [value]             - append to time filter %s
+ ft   [value]             - (re)configure time filter %s
+ rate [value]             - adjust rate of requests per second %s
+ queueshow                - show job queue
+ queuedel [number]        - delete a job in the queue
+ queueskip                - advance to the next queued job
+ restart                  - restart and resume the current h3fuzz job
+ resume                   - resume current h3fuzz job (or: ENTER)
+ show                     - show results for the current job
+ savejson [filename]      - save current matches to a file
+ help                     - you are looking at it
+`
+	i.Job.Output.Raw(fmt.Sprintf(help, fc, fc, fl, fl, fw, fw, fs, fs, ft, ft, rate))
+}

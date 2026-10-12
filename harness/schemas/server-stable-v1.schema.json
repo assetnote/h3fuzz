@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetnote.invalid/h3fuzz/schemas/server-stable-v1.schema.json",
+  "title": "h3fuzz PERF-003 stable server evidence",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "provider_version",
+    "captured_at",
+    "host_identity_sha256",
+    "boot_id",
+    "kernel",
+    "cpu",
+    "memory_bytes",
+    "network_namespace_inode",
+    "udp_sysctls_bytes",
+    "origin"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "server_stable"},
+    "provider_version": {"type": "string", "minLength": 1},
+    "captured_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "host_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "boot_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "kernel": {
+      "type": "object",
+      "required": ["sysname", "release"],
+      "properties": {
+        "sysname": {"const": "Linux"},
+        "release": {"type": "string", "minLength": 1}
+      }
+    },
+    "cpu": {
+      "type": "object",
+      "required": ["model", "logical_cpus", "affinity_cpus", "frequency_governor"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "logical_cpus": {"type": "integer", "minimum": 1},
+        "affinity_cpus": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0}
+        },
+        "frequency_governor": {"type": "string", "minLength": 1}
+      }
+    },
+    "memory_bytes": {"type": "integer", "minimum": 1},
+    "network_namespace_inode": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "udp_sysctls_bytes": {
+      "type": "object",
+      "required": ["rmem_default", "rmem_max", "wmem_default", "wmem_max"],
+      "properties": {
+        "rmem_default": {"type": "integer", "minimum": 1},
+        "rmem_max": {"type": "integer", "minimum": 1},
+        "wmem_default": {"type": "integer", "minimum": 1},
+        "wmem_max": {"type": "integer", "minimum": 1}
+      }
+    },
+    "origin": {
+      "type": "object",
+      "required": ["binary_sha256", "image_id_or_digest", "config_sha256"],
+      "properties": {
+        "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "image_id_or_digest": {"type": "string", "minLength": 1},
+        "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

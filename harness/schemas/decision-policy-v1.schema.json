@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/decision-policy-v1.schema.json",
+  "title": "h3fuzz immutable PERF-501 fixed-sweep decision policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_type",
+    "created_at",
+    "policy_generation",
+    "source_baseline",
+    "control_window_rates",
+    "median_completed_response_rps",
+    "median_absolute_deviation_completed_response_rps",
+    "noise_band_percent",
+    "noise_band_formula",
+    "client_cpu_max_percent",
+    "server_cpu_max_percent",
+    "network_utilization_max_percent",
+    "p99_latency_max_ms",
+    "minimum_improvement_percent",
+    "platform_key",
+    "client_build_key",
+    "workload_key",
+    "treatment_key",
+    "cohort_key",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_type": {"const": "h3fuzz-fixed-sweep-decision-policy"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "policy_generation": {"const": "frozen-b0-mad-v1"},
+    "source_baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "file_sha256", "run_count", "reports"],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "file_sha256": {"$ref": "#/$defs/sha256"},
+        "run_count": {"type": "integer", "minimum": 5},
+        "reports": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ordinal", "sha256"],
+            "properties": {
+              "ordinal": {"type": "integer", "minimum": 1},
+              "sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        }
+      }
+    },
+    "control_window_rates": {
+      "type": "array",
+      "minItems": 5,
+      "items": {"type": "number", "exclusiveMinimum": 0}
+    },
+    "median_completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+    "median_absolute_deviation_completed_response_rps": {"type": "number", "minimum": 0},
+    "noise_band_percent": {"type": "number", "minimum": 0},
+    "noise_band_formula": {
+      "const": "100 * 1.4826 * MAD(completed_response_rps) / median(completed_response_rps)"
+    },
+    "client_cpu_max_percent": {"type": "number", "exclusiveMinimum": 0},
+    "server_cpu_max_percent": {"type": "number", "exclusiveMinimum": 0},
+    "network_utilization_max_percent": {"type": "number", "exclusiveMinimum": 0},
+    "p99_latency_max_ms": {"type": "number", "exclusiveMinimum": 0},
+    "minimum_improvement_percent": {"type": "number", "minimum": 3},
+    "platform_key": {"$ref": "#/$defs/sha256"},
+    "client_build_key": {"$ref": "#/$defs/sha256"},
+    "workload_key": {"$ref": "#/$defs/sha256"},
+    "treatment_key": {"$ref": "#/$defs/sha256"},
+    "cohort_key": {"$ref": "#/$defs/sha256"},
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

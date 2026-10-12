@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "manifest_type": "h3fuzz-network-matrix-profile-set",
+  "latency_semantics": "round_trip_time",
+  "directions_shaped": [
+    "client_to_server",
+    "server_to_client"
+  ],
+  "profiles": [
+    {"profile_id":"clean-rtt1-s64","class":"mandatory-clean","rtt_ms":1,"loss_percent":0,"seed":1101,"peer_stream_limit":64,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt1-s256","class":"mandatory-clean","rtt_ms":1,"loss_percent":0,"seed":1102,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt25-s64","class":"mandatory-clean","rtt_ms":25,"loss_percent":0,"seed":2501,"peer_stream_limit":64,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt25-s256","class":"mandatory-clean","rtt_ms":25,"loss_percent":0,"seed":2502,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt50-s64","class":"mandatory-clean","rtt_ms":50,"loss_percent":0,"seed":5001,"peer_stream_limit":64,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt50-s256","class":"mandatory-clean","rtt_ms":50,"loss_percent":0,"seed":5002,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt100-s64","class":"mandatory-clean","rtt_ms":100,"loss_percent":0,"seed":10001,"peer_stream_limit":64,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"clean-rtt100-s256","class":"mandatory-clean","rtt_ms":100,"loss_percent":0,"seed":10002,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"safety-rtt25-loss01","class":"mandatory-safety","rtt_ms":25,"loss_percent":0.1,"seed":25101,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"safety-rtt25-loss1","class":"mandatory-safety","rtt_ms":25,"loss_percent":1,"seed":25100,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"safety-transient-failure","class":"mandatory-safety","rtt_ms":25,"loss_percent":0,"seed":25901,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"transient-link-down","failure_after_ms":10000,"failure_duration_ms":1000},
+    {"profile_id":"safety-http429","class":"mandatory-safety","rtt_ms":25,"loss_percent":0,"seed":25902,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":50000,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"safety-short-input","class":"mandatory-safety","rtt_ms":25,"loss_percent":0,"seed":25903,"peer_stream_limit":256,"wordlist_profile":"short","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"explore-rtt10","class":"exploratory","rtt_ms":10,"loss_percent":0,"seed":10901,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"explore-loss001","class":"exploratory","rtt_ms":25,"loss_percent":0.01,"seed":25001,"peer_stream_limit":256,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0},
+    {"profile_id":"explore-stream512","class":"exploratory","rtt_ms":25,"loss_percent":0,"seed":25512,"peer_stream_limit":512,"wordlist_profile":"long","throttle_rps":0,"throttle_status":429,"failure_profile":"none","failure_after_ms":0,"failure_duration_ms":0}
+  ]
+}

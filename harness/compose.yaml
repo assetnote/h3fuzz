@@ -1,0 +1,79 @@
+name: h3fuzz-harness
+
+services:
+  caddy:
+    image: assetnote/h3fuzz-harness-caddy:2.11.4
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - caddy
+      - run
+      - --config
+      - /etc/caddy/${H3FUZZ_CADDYFILE:-Caddyfile.instrumented}
+      - --adapter
+      - caddyfile
+    init: true
+    ports:
+      - "127.0.0.1:8443:8443/tcp"
+      - "127.0.0.1:8443:8443/udp"
+      - "127.0.0.1:8444:8444/tcp"
+      # Caddy listens for H3 internally on 8445, but UDP is deliberately not
+      # published. This models stale Alt-Svc / UDP-blocked networks.
+      - "127.0.0.1:8445:8445/tcp"
+      # The 8446 virtual host is HTTP/3-only.
+      - "127.0.0.1:8446:8446/udp"
+      # Loopback-only metrics/admin endpoint for the harness.
+      - "127.0.0.1:2019:2019/tcp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 2s
+    stop_grace_period: 5s
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+  instrumented-origin:
+    profiles: ["instrumented-origin"]
+    image: assetnote/h3fuzz-instrumented-origin:local
+    build:
+      context: ..
+      dockerfile: harness/Dockerfile.instrumented-origin
+    command:
+      - -listen
+      - :9443
+      - -admin-listen
+      - 127.0.0.1:9090
+      - -files-root
+      - /srv
+      - -cert
+      - /var/lib/h3fuzz-origin/cert.pem
+      - -key
+      - /var/lib/h3fuzz-origin/key.pem
+      - -counters=${H3FUZZ_ORIGIN_COUNTERS:-true}
+      - -max-incoming-streams
+      - ${H3FUZZ_ORIGIN_MAX_STREAMS:-256}
+    init: true
+    ports:
+      - "127.0.0.1:9443:9443/tcp"
+      - "127.0.0.1:9443:9443/udp"
+    volumes:
+      - origin_data:/var/lib/h3fuzz-origin
+    stop_grace_period: 10s
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+volumes:
+  caddy_data:
+  caddy_config:
+  origin_data:
+

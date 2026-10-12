@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "00000000-0000-4000-8000-000000000002",
+  "captured_at": "2026-10-11T01:00:30Z",
+  "origin": {
+    "origin_instance_id": "10000000-0000-4000-8000-000000000001",
+    "started_at": "2026-10-11T00:00:00Z",
+    "build_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "config_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "configured_max_incoming_streams": 256,
+    "effective_max_incoming_streams": 256,
+    "counter_epoch": 1
+  },
+  "counters": [
+    {
+      "run_id": null,
+      "phase": "unmarked",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "GET",
+      "role": null,
+      "handler_requests": 3,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    },
+    {
+      "run_id": "11111111-2222-4333-8444-555555555555",
+      "phase": "main",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "HEAD",
+      "role": "initial",
+      "handler_requests": 100,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    },
+    {
+      "run_id": "11111111-2222-4333-8444-555555555555",
+      "phase": "main",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "GET",
+      "role": "optimization_fallback",
+      "handler_requests": 2,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    },
+    {
+      "run_id": "11111111-2222-4333-8444-555555555555",
+      "phase": "main",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "GET",
+      "role": "engine_retry",
+      "handler_requests": 1,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    },
+    {
+      "run_id": "99999999-8888-4777-8666-555555555555",
+      "phase": "main",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "GET",
+      "role": "initial",
+      "handler_requests": 20,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    }
+  ]
+}

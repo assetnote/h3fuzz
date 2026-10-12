@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-10-11T00:00:00.123456789Z",
+  "hostname": "portable-fixture",
+  "uname": {
+    "sysname": "Darwin",
+    "release": "25.0.0-fixture",
+    "machine": "arm64"
+  },
+  "cpu_model": "Fixture Apple Silicon",
+  "logical_cpus": 10,
+  "affinity_cpus": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "frequency_governor": "unavailable",
+  "memory_bytes": 34359738368,
+  "go_version": "go1.26.0 darwin/arm64",
+  "go_modules": {
+    "github.com/quic-go/quic-go": "v0.63.0",
+    "github.com/quic-go/qpack": "v0.6.0"
+  },
+  "source_git_commit": "1111111111111111111111111111111111111111",
+  "source_dirty": true,
+  "container_runtime": {
+    "name": null,
+    "version": null
+  },
+  "images": {},
+  "dns": {
+    "origin.example": ["203.0.113.10"]
+  },
+  "rtt_ms": {
+    "origin.example": 7.5
+  }
+}

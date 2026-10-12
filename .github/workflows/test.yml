@@ -1,0 +1,137 @@
+name: test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.1.0
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Verify third-party license bundle
+        run: |
+          node scripts/generate-third-party-licenses.mjs
+          git diff --exit-code -- THIRD_PARTY_LICENSES.txt
+          test -z "$(git status --porcelain --untracked-files=all -- THIRD_PARTY_LICENSES.txt)"
+      - name: Lint frontend
+        working-directory: frontend
+        run: pnpm lint
+      - name: Test frontend
+        working-directory: frontend
+        run: pnpm test
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+      - name: Verify embedded web assets are current
+        run: |
+          git diff --exit-code -- web/dist
+          test -z "$(git status --porcelain --untracked-files=all -- web/dist)"
+
+  third-party:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: verify patched quic-go provenance
+        run: scripts/verify-third-party-quic-go.sh
+      - name: vet and race-test patched quic-go HTTP/3 package
+        working-directory: third_party/quic-go
+        run: |
+          go vet ./http3
+          go test -race ./http3 -count=1
+      - name: root module metadata is current
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  # Build, vet, and run the whole suite with the race detector across the
+  # supported Go floor + latest, on Linux and macOS. Windows is intentionally
+  # not in the matrix yet: several existing tests are not Windows-clean (the
+  # help-golden test deadlocks on Windows' small stdout pipe buffer, and a couple
+  # of output tests assume POSIX terminal control), so enabling it would need
+  # those fixed first.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: ['1.26', 'stable']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ matrix.go }}
+      - name: go vet
+        run: go vet ./...
+      - name: go test (race)
+        run: go test -race ./... -count=1
+
+  # Gating: wall-clock timing and rate-limit tests behind the `timing` build tag.
+  # The margins are wide (500ms/800ms) so the required gate stays stable while
+  # still protecting -rate and the time matcher.
+  timing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+      - name: go test -tags=timing
+        run: go test -tags=timing ./... -count=1
+
+  # Informational coverage. Not gated; ratchet a threshold in once it settles.
+  coverage:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+      - name: coverage
+        run: |
+          go test -coverprofile=coverage.out ./... >/dev/null
+          go tool cover -func=coverage.out | tail -1
+
+  # Characterization goldens (help output, etc.) must be regenerated and
+  # committed with any change that affects them.
+  golden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+      - name: characterization goldens are current
+        run: |
+          go test -run Characterization -update-golden .
+          if [ -n "$(git status --porcelain -- testdata/)" ]; then
+            echo "::error::characterization goldens are out of date. Run: go test -run Characterization -update-golden ."
+            git diff -- testdata/
+            exit 1
+          fi

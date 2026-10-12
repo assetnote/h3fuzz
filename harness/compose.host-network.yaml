@@ -1,0 +1,70 @@
+# Linux certification profile. Stop the portable compose project before using
+# this file because the service binds directly to host ports 2019 and 8443-8446.
+name: h3fuzz-harness-host
+
+services:
+  caddy:
+    image: assetnote/h3fuzz-harness-caddy:2.11.4
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - caddy
+      - run
+      - --config
+      - /etc/caddy/${H3FUZZ_CADDYFILE:-Caddyfile.ceiling}
+      - --adapter
+      - caddyfile
+    init: true
+    network_mode: host
+    environment:
+      H3FUZZ_ADMIN_ADDR: 127.0.0.1:2019
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+      start_period: 2s
+    stop_grace_period: 5s
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+  instrumented-origin:
+    profiles: ["instrumented-origin"]
+    image: assetnote/h3fuzz-instrumented-origin:local
+    build:
+      context: ..
+      dockerfile: harness/Dockerfile.instrumented-origin
+    command:
+      - -listen
+      - :9443
+      - -admin-listen
+      - 127.0.0.1:9090
+      - -files-root
+      - /srv
+      - -cert
+      - /var/lib/h3fuzz-origin/cert.pem
+      - -key
+      - /var/lib/h3fuzz-origin/key.pem
+      - -counters=${H3FUZZ_ORIGIN_COUNTERS:-true}
+      - -max-incoming-streams
+      - ${H3FUZZ_ORIGIN_MAX_STREAMS:-256}
+    init: true
+    network_mode: host
+    volumes:
+      - origin_data:/var/lib/h3fuzz-origin
+    stop_grace_period: 10s
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+volumes:
+  caddy_data:
+  caddy_config:
+  origin_data:

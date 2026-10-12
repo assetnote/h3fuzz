@@ -1,0 +1,37 @@
+# Compiled programs and test binaries
+/ffuf
+/h3fuzz
+/h3fuzz-*
+/*.test
+/dist/
+
+# Web console runtime state and generated credentials
+/*.db
+/*.db-*
+/*.sqlite
+/*.sqlite-*
+/*.cert.pem
+/*.key.pem
+
+# Frontend dependencies and local package caches
+/frontend/node_modules/
+/.pnpm-store/
+
+# Harness output and local profiling data
+/harness/.work/
+*.coverage
+coverage.out
+*.coverprofile
+*.prof
+*.pprof
+*.trace
+*.qlog
+*.sqlog
+
+# Python, editor, and operating-system state
+**/__pycache__/
+*.py[cod]
+.DS_Store
+.idea/
+.vscode/
+*.swp

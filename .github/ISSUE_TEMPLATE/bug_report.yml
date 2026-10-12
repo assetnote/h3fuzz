@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem in h3fuzz
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check the [README](https://github.com/assetnote/h3fuzz#readme) and [documentation index](https://github.com/assetnote/h3fuzz/blob/main/docs/README.md). For transport-selection problems, also read the [protocol selection guide](https://github.com/assetnote/h3fuzz/blob/main/docs/protocol-selection.md).
+
+        Do not file a public issue for a security vulnerability in h3fuzz. Follow the private reporting process in the [security policy](https://github.com/assetnote/h3fuzz/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: h3fuzz version
+      description: Output of `h3fuzz -V`. If you built from source, include the commit.
+      placeholder: "e.g. v0.1.0 or git-2026-10-12-abcdef0"
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      description: Where did the problem occur?
+      options:
+        - Web console
+        - Command line
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or scan configuration
+      description: Include the exact h3fuzz command or exported web scan configuration. Redact credentials, tokens, and private target data.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest repeatable sequence that demonstrates the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+      description: Include the relevant output. Paste text rather than screenshots where you can.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your operating system and architecture, browser for web-console issues, and `go version` if you built from source.
+      placeholder: "e.g. Ubuntu 26.04 amd64, Chromium 140, go1.26"
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Include relevant logs, protocol preflight output, sanitized config, wordlist characteristics, or target behavior. Paste text instead of screenshots where possible.
+    validations:
+      required: false

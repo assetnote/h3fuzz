@@ -1,0 +1,52 @@
+name: ClusterFuzzLite PR fuzzing
+on:
+  pull_request:
+    paths:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  PR:
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    env:
+      # Forked PRs don't receive repository secrets, so they run without corpus storage.
+      CLUSTERFUZZ_LITE_STORAGE_REPO: >-
+        ${{
+          github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id &&
+          format('https://{0}@github.com/quic-go/clusterfuzzlite-storage.git', secrets.CLUSTERFUZZ_LITE_STORAGE) || ''
+        }}
+    runs-on: ${{ fromJSON(vars['CLUSTERFUZZ_LITE_RUNNER_UBUNTU'] || '"ubuntu-latest"') }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+        - address
+    steps:
+    - name: Build Fuzzers (${{ matrix.sanitizer }})
+      uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+      with:
+        language: go
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        sanitizer: ${{ matrix.sanitizer }}
+        storage-repo: ${{ env.CLUSTERFUZZ_LITE_STORAGE_REPO }}
+        storage-repo-branch: master
+        storage-repo-branch-coverage: gh-pages
+    - name: Run Fuzzers (${{ matrix.sanitizer }})
+      uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        fuzz-seconds: 480
+        mode: 'code-change'
+        sanitizer: ${{ matrix.sanitizer }}
+        output-sarif: true
+        parallel-fuzzing: true
+        storage-repo: ${{ env.CLUSTERFUZZ_LITE_STORAGE_REPO }}
+        storage-repo-branch: master
+        storage-repo-branch-coverage: gh-pages

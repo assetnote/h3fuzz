@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/sweep-resource-usage-v1.schema.json",
+  "title": "h3fuzz fixed-sweep resource evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "eligible",
+    "ineligibility_reasons",
+    "metrics",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "sweep_resource_usage"},
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "eligible": {"type": "boolean"},
+    "ineligibility_reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "metrics": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/resourceMetrics"}
+      ]
+    },
+    "provenance": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/resourceProvenance"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"eligible": {"const": true}}},
+      "then": {
+        "properties": {
+          "ineligibility_reasons": {"maxItems": 0},
+          "metrics": {"$ref": "#/$defs/resourceMetrics"},
+          "provenance": {"$ref": "#/$defs/resourceProvenance"}
+        }
+      },
+      "else": {
+        "properties": {
+          "ineligibility_reasons": {"minItems": 1},
+          "metrics": {"type": "null"},
+          "provenance": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decimal": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "resourceMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_cpu_percent",
+        "server_cpu_percent",
+        "network_utilization_percent",
+        "p99_latency_ms"
+      ],
+      "properties": {
+        "client_cpu_percent": {"type": "number", "minimum": 0},
+        "server_cpu_percent": {"type": "number", "minimum": 0},
+        "network_utilization_percent": {"type": "number", "minimum": 0},
+        "p99_latency_ms": {"type": "number", "minimum": 0}
+      }
+    },
+    "cpuProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "capture_scope",
+        "before_artifact_sha256",
+        "after_artifact_sha256",
+        "before_captured_at",
+        "after_captured_at",
+        "duration_ns",
+        "role",
+        "pid",
+        "start_ticks",
+        "cpu_time_delta_ns",
+        "formula"
+      ],
+      "properties": {
+        "source": {"const": "perf003_point_pair_process_cpu_time"},
+        "capture_scope": {"enum": ["client_point_snapshot_interval", "server_point_snapshot_interval"]},
+        "before_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "after_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "before_captured_at": {"$ref": "#/$defs/timestamp"},
+        "after_captured_at": {"$ref": "#/$defs/timestamp"},
+        "duration_ns": {"$ref": "#/$defs/decimal"},
+        "role": {"enum": ["h3fuzz", "origin"]},
+        "pid": {"type": "integer", "minimum": 1},
+        "start_ticks": {"$ref": "#/$defs/decimal"},
+        "cpu_time_delta_ns": {"$ref": "#/$defs/decimal"},
+        "formula": {"const": "100 * cpu_time_delta_ns / capture_duration_ns"}
+      }
+    },
+    "networkObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "ifindex",
+        "name",
+        "counter_source",
+        "link_speed_bits_per_second",
+        "capture_duration_ns",
+        "rx_bytes_delta",
+        "tx_bytes_delta",
+        "full_duplex_direction_utilization_percent"
+      ],
+      "properties": {
+        "endpoint": {"enum": ["client", "server"]},
+        "ifindex": {"type": "integer", "minimum": 1},
+        "name": {"type": "string", "minLength": 1},
+        "counter_source": {"enum": ["sysfs", "netlink"]},
+        "link_speed_bits_per_second": {"$ref": "#/$defs/decimal"},
+        "capture_duration_ns": {"$ref": "#/$defs/decimal"},
+        "rx_bytes_delta": {"$ref": "#/$defs/decimal"},
+        "tx_bytes_delta": {"$ref": "#/$defs/decimal"},
+        "full_duplex_direction_utilization_percent": {"type": "number", "minimum": 0}
+      }
+    },
+    "networkProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "capture_scope",
+        "aggregation",
+        "formula",
+        "client_before_artifact_sha256",
+        "client_after_artifact_sha256",
+        "server_before_artifact_sha256",
+        "server_after_artifact_sha256",
+        "observations"
+      ],
+      "properties": {
+        "source": {"const": "perf003_point_pair_interface_byte_counters"},
+        "capture_scope": {"const": "client_and_server_point_snapshot_intervals"},
+        "aggregation": {"const": "maximum_observed_full_duplex_direction_utilization"},
+        "formula": {"const": "100 * 8 * max(rx_bytes_delta, tx_bytes_delta) / (capture_duration_seconds * link_speed_bits_per_second)"},
+        "client_before_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "client_after_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "server_before_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "server_after_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "observations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/networkObservation"}
+        }
+      }
+    },
+    "latencyProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "capture_scope",
+        "telemetry_artifact_sha256",
+        "latency_schema_version",
+        "clock",
+        "unit",
+        "method",
+        "sample_count",
+        "p99_upper_bound_ns",
+        "maximum_trackable_ns",
+        "overflow_count",
+        "formula"
+      ],
+      "properties": {
+        "source": {"const": "run_telemetry.responses.latency"},
+        "capture_scope": {"const": "main_successful_logical_responses"},
+        "telemetry_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "latency_schema_version": {"const": 1},
+        "clock": {"const": "monotonic"},
+        "unit": {"const": "nanoseconds"},
+        "method": {"const": "bounded_histogram_upper_bound"},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "p99_upper_bound_ns": {"type": "integer", "minimum": 0},
+        "maximum_trackable_ns": {"type": "integer", "minimum": 1},
+        "overflow_count": {"const": 0},
+        "formula": {"const": "p99_upper_bound_ns / 1000000"}
+      }
+    },
+    "resourceProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_cpu_percent",
+        "server_cpu_percent",
+        "network_utilization_percent",
+        "p99_latency_ms"
+      ],
+      "properties": {
+        "client_cpu_percent": {"$ref": "#/$defs/cpuProvenance"},
+        "server_cpu_percent": {"$ref": "#/$defs/cpuProvenance"},
+        "network_utilization_percent": {"$ref": "#/$defs/networkProvenance"},
+        "p99_latency_ms": {"$ref": "#/$defs/latencyProvenance"}
+      }
+    }
+  }
+}

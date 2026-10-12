@@ -1,0 +1,13 @@
+* text=auto
+
+*.go text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+third_party/** linguist-vendored
+web/dist/** linguist-generated
+final.txt linguist-generated
+# The generated bundle preserves upstream notice bytes so its embedded
+# SHA-256 identifiers continue to describe the committed verbatim sections.
+THIRD_PARTY_LICENSES.txt -text linguist-generated

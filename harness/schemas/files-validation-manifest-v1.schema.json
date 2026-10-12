@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://h3fuzz.invalid/schemas/files-validation-manifest-v1.schema.json",
+  "title": "h3fuzz PERF-503 files validation manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_type",
+    "created_at",
+    "eligible",
+    "ineligible_reasons",
+    "platform_key",
+    "client_build_key",
+    "workload_key",
+    "authority",
+    "server_identity",
+    "route",
+    "selected_point",
+    "ceiling_reference",
+    "corpus",
+    "duplicate_accounting",
+    "correctness",
+    "throughput",
+    "runs",
+    "members",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "manifest_type": {"const": "h3fuzz-files-validation"},
+    "created_at": {"type": "string", "minLength": 1},
+    "eligible": {"const": true},
+    "ineligible_reasons": {"type": "array", "maxItems": 0},
+    "platform_key": {"$ref": "#/$defs/sha256"},
+    "client_build_key": {"$ref": "#/$defs/sha256"},
+    "workload_key": {"$ref": "#/$defs/sha256"},
+    "authority": {"type": "string", "minLength": 1},
+    "server_identity": {"type": "string", "minLength": 1},
+    "route": {"const": "/files/FUZZ"},
+    "selected_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "streams", "max_workers", "treatment_key", "cohort_key"],
+      "properties": {
+        "connections": {"type": "integer", "minimum": 1},
+        "streams": {"type": "integer", "minimum": 1},
+        "max_workers": {"type": "integer", "minimum": 1},
+        "treatment_key": {"$ref": "#/$defs/sha256"},
+        "cohort_key": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "ceiling_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "workload_key", "authority", "route"],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "workload_key": {"$ref": "#/$defs/sha256"},
+        "authority": {"type": "string", "minLength": 1},
+        "route": {"const": "/bench/FUZZ"}
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generator",
+        "seed",
+        "target_seconds",
+        "headroom_percent",
+        "target_inputs",
+        "line_count",
+        "sha256",
+        "known_hit_count",
+        "unique_miss_count",
+        "base_unique_count",
+        "base_duplicate_count",
+        "known_hits_added",
+        "known_hit_duplicates_removed",
+        "path"
+      ],
+      "properties": {
+        "generator": {"const": "h3fuzz-files-seeded-corpus-v1"},
+        "seed": {"type": "integer", "minimum": 0},
+        "target_seconds": {"type": "integer", "minimum": 30},
+        "headroom_percent": {"const": 20},
+        "target_inputs": {"type": "integer", "minimum": 1},
+        "line_count": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "known_hit_count": {"type": "integer", "minimum": 1},
+        "unique_miss_count": {"type": "integer", "minimum": 0},
+        "base_unique_count": {"type": "integer", "minimum": 0},
+        "base_duplicate_count": {"type": "integer", "minimum": 0},
+        "known_hits_added": {"type": "integer", "minimum": 0},
+        "known_hit_duplicates_removed": {"type": "integer", "minimum": 0},
+        "path": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "duplicate_accounting": {"type": "string", "minLength": 1},
+    "correctness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "expected_hits",
+        "actual_hits",
+        "false_positives",
+        "missing_hits",
+        "unexpected_hits",
+        "filter_matches_get_control",
+        "metadata_compatible",
+        "get_strategy",
+        "optimized_strategy",
+        "get_application_attempts",
+        "optimized_application_attempts",
+        "comparison"
+      ],
+      "properties": {
+        "passed": {"const": true},
+        "expected_hits": {"type": "integer", "minimum": 1},
+        "actual_hits": {"type": "integer", "minimum": 1},
+        "false_positives": {"const": 0},
+        "missing_hits": {"type": "array", "maxItems": 0},
+        "unexpected_hits": {"type": "array", "maxItems": 0},
+        "filter_matches_get_control": {"const": true},
+        "metadata_compatible": {"const": true},
+        "get_strategy": {"const": "GET"},
+        "optimized_strategy": {"enum": ["HEAD", "RANGE", "GET"]},
+        "get_application_attempts": {"type": "integer", "minimum": 1},
+        "optimized_application_attempts": {"type": "integer", "minimum": 1},
+        "comparison": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "throughput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "bench_route",
+        "distinct_from_bench",
+        "completed_response_rps",
+        "main_request_span_seconds",
+        "successful_logical_responses",
+        "server_handler_requests",
+        "expected_hits",
+        "actual_hits",
+        "false_positives",
+        "report"
+      ],
+      "properties": {
+        "route": {"const": "/files/FUZZ"},
+        "bench_route": {"const": "/bench/FUZZ"},
+        "distinct_from_bench": {"const": true},
+        "completed_response_rps": {"type": "number", "exclusiveMinimum": 0},
+        "main_request_span_seconds": {"type": "number", "minimum": 30},
+        "successful_logical_responses": {"type": "integer", "minimum": 1},
+        "server_handler_requests": {"type": "integer", "minimum": 1},
+        "expected_hits": {"type": "integer", "minimum": 1},
+        "actual_hits": {"type": "integer", "minimum": 1},
+        "false_positives": {"const": 0},
+        "report": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "runs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_hit", "long_corpus"],
+      "properties": {
+        "exact_hit": {"$ref": "#/$defs/artifact"},
+        "long_corpus": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/member"}
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

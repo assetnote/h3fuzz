@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "00000000-0000-4000-8000-000000000001",
+  "captured_at": "2026-10-11T01:00:00Z",
+  "origin": {
+    "origin_instance_id": "10000000-0000-4000-8000-000000000001",
+    "started_at": "2026-10-11T00:00:00Z",
+    "build_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "config_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "configured_max_incoming_streams": 256,
+    "effective_max_incoming_streams": 256,
+    "counter_epoch": 1
+  },
+  "counters": [
+    {
+      "run_id": null,
+      "phase": "unmarked",
+      "route": "bench",
+      "protocol": "h3",
+      "method": "GET",
+      "role": null,
+      "handler_requests": 2,
+      "h3_attempts": null,
+      "h3_request_rejections": null
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+version: 2
+project_name: h3fuzz
+
+builds:
+  - id: h3fuzz
+    binary: h3fuzz
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    ldflags: >-
+      -s -w -X github.com/assetnote/h3fuzz/pkg/ffuf.VERSION={{ .Version }} -X github.com/assetnote/h3fuzz/pkg/ffuf.VERSION_APPENDIX= -extldflags '-static'
+    goos:
+      - linux
+      - windows
+      - freebsd
+      - openbsd
+      - darwin
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+    ignore:
+      # modernc.org/sqlite and its libc layer do not compile for these 32-bit
+      # BSD targets with the pinned dependency versions.
+      - goos: freebsd
+        goarch: "386"
+      - goos: freebsd
+        goarch: arm
+      - goos: openbsd
+        goarch: "386"
+      - goos: openbsd
+        goarch: arm
+      # These legacy Darwin pairs are not supported by the Go toolchain.
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      # Go no longer supports 32-bit ARM on Windows (unsupported GOOS/GOARCH pair
+      # as of modern toolchains), so windows/arm can't be built anymore.
+      - goos: windows
+        goarch: arm
+
+archives:
+  - id: tgz
+    formats: [tar.gz]
+    # Keep release archive names compact and consistent across platforms.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}_
+      {{- .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - THIRD_PARTY_LICENSES.txt
+      - THIRD_PARTY_NOTICES.md
+      - ffufrc.example
+      - final.txt
+      - docs/*
+      - harness/*
+      # Preserve the repo-relative paths used by the fork provenance metadata.
+      - third_party/quic-go-a42.patch
+      - third_party/quic-go.UPSTREAM.json
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+release:
+  prerelease: auto

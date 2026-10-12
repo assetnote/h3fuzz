@@ -1,0 +1,47 @@
+ARG GO_IMAGE=docker.io/library/golang:1.26.0-alpine3.22
+ARG ALPINE_IMAGE=docker.io/library/alpine:3.22
+
+FROM ${GO_IMAGE} AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY harness/cmd/instrumented-origin ./harness/cmd/instrumented-origin
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags='-s -w -buildid=' \
+    -o /out/instrumented-origin \
+    ./harness/cmd/instrumented-origin
+
+FROM ${ALPINE_IMAGE}
+
+RUN apk add --no-cache bash ca-certificates python3 \
+    && addgroup -S origin \
+    && adduser -S -D -H -G origin origin \
+    && install -d -m 0755 -o origin -g origin /srv \
+    && install -d -m 0700 -o origin -g origin /var/lib/h3fuzz-origin \
+    && install -d -m 0755 /opt/h3fuzz-harness/scripts /opt/h3fuzz-harness/schemas
+
+COPY --from=build /out/instrumented-origin /usr/local/bin/instrumented-origin
+COPY harness/server/generate-fixtures.sh /usr/local/bin/generate-h3fuzz-fixtures
+COPY harness/scripts/origin-snapshot.sh harness/scripts/origin_snapshot.py /opt/h3fuzz-harness/scripts/
+COPY harness/schemas/origin-counter-v1.schema.json /opt/h3fuzz-harness/schemas/
+
+RUN chmod 0755 \
+      /usr/local/bin/instrumented-origin \
+      /usr/local/bin/generate-h3fuzz-fixtures \
+      /opt/h3fuzz-harness/scripts/origin-snapshot.sh \
+      /opt/h3fuzz-harness/scripts/origin_snapshot.py \
+    && /usr/local/bin/generate-h3fuzz-fixtures /srv \
+    && chown -R origin:origin /srv /var/lib/h3fuzz-origin
+
+USER origin
+WORKDIR /srv
+
+EXPOSE 9443/tcp 9443/udp
+
+HEALTHCHECK --interval=2s --timeout=1s --retries=15 --start-period=2s \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/admin/v1', timeout=0.5).read()" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/instrumented-origin"]
+CMD ["-listen", ":9443", "-admin-listen", "127.0.0.1:9090", "-files-root", "/srv", "-cert", "/var/lib/h3fuzz-origin/cert.pem", "-key", "/var/lib/h3fuzz-origin/key.pem", "-counters=true", "-max-incoming-streams", "256"]

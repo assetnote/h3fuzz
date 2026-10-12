@@ -1,0 +1,494 @@
+:where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+  --ui-p-active: var(--ui-p-base);
+  --ui-px-active: var(--ui-px-base);
+  --ui-py-active: var(--ui-py-base);
+  --ui-pt-active: var(--ui-pt-base);
+  --ui-pr-active: var(--ui-pr-base);
+  --ui-pb-active: var(--ui-pb-base);
+  --ui-pl-active: var(--ui-pl-base);
+  --ui-m-active: var(--ui-m-base);
+  --ui-mx-active: var(--ui-mx-base);
+  --ui-my-active: var(--ui-my-base);
+  --ui-mt-active: var(--ui-mt-base);
+  --ui-mr-active: var(--ui-mr-base);
+  --ui-mb-active: var(--ui-mb-base);
+  --ui-ml-active: var(--ui-ml-base);
+  --ui-w-active: var(--ui-w-base);
+  --ui-h-active: var(--ui-h-base);
+  --ui-maw-active: var(--ui-maw-base);
+  --ui-mih-active: var(--ui-mih-base);
+  --ui-gap-active: var(--ui-gap-base);
+}
+
+.uiSimpleGrid {
+  display: grid;
+  grid-template-columns: repeat(var(--ui-cols-base, 1), minmax(0, 1fr));
+  gap: var(--ui-grid-gap-base, var(--space-3));
+}
+
+.uiGrid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.uiGridCol {
+  grid-column: span var(--ui-span-base, 12) / span var(--ui-span-base, 12);
+  min-width: 0;
+}
+
+@media (min-width: 36em) {
+  :where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+    --ui-p-active: var(--ui-p-xs, var(--ui-p-base));
+    --ui-px-active: var(--ui-px-xs, var(--ui-px-base));
+    --ui-py-active: var(--ui-py-xs, var(--ui-py-base));
+    --ui-pt-active: var(--ui-pt-xs, var(--ui-pt-base));
+    --ui-pr-active: var(--ui-pr-xs, var(--ui-pr-base));
+    --ui-pb-active: var(--ui-pb-xs, var(--ui-pb-base));
+    --ui-pl-active: var(--ui-pl-xs, var(--ui-pl-base));
+    --ui-m-active: var(--ui-m-xs, var(--ui-m-base));
+    --ui-mx-active: var(--ui-mx-xs, var(--ui-mx-base));
+    --ui-my-active: var(--ui-my-xs, var(--ui-my-base));
+    --ui-mt-active: var(--ui-mt-xs, var(--ui-mt-base));
+    --ui-mr-active: var(--ui-mr-xs, var(--ui-mr-base));
+    --ui-mb-active: var(--ui-mb-xs, var(--ui-mb-base));
+    --ui-ml-active: var(--ui-ml-xs, var(--ui-ml-base));
+    --ui-w-active: var(--ui-w-xs, var(--ui-w-base));
+    --ui-h-active: var(--ui-h-xs, var(--ui-h-base));
+    --ui-maw-active: var(--ui-maw-xs, var(--ui-maw-base));
+    --ui-mih-active: var(--ui-mih-xs, var(--ui-mih-base));
+    --ui-gap-active: var(--ui-gap-xs, var(--ui-gap-base));
+  }
+
+  .uiSimpleGrid {
+    grid-template-columns: repeat(var(--ui-cols-xs, var(--ui-cols-base, 1)), minmax(0, 1fr));
+    gap: var(--ui-grid-gap-xs, var(--ui-grid-gap-base, var(--space-3)));
+  }
+
+  .uiGridCol {
+    grid-column: span var(--ui-span-xs, var(--ui-span-base, 12)) / span var(--ui-span-xs, var(--ui-span-base, 12));
+  }
+}
+
+@media (min-width: 48em) {
+  :where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+    --ui-p-active: var(--ui-p-sm, var(--ui-p-xs, var(--ui-p-base)));
+    --ui-px-active: var(--ui-px-sm, var(--ui-px-xs, var(--ui-px-base)));
+    --ui-py-active: var(--ui-py-sm, var(--ui-py-xs, var(--ui-py-base)));
+    --ui-pt-active: var(--ui-pt-sm, var(--ui-pt-xs, var(--ui-pt-base)));
+    --ui-pr-active: var(--ui-pr-sm, var(--ui-pr-xs, var(--ui-pr-base)));
+    --ui-pb-active: var(--ui-pb-sm, var(--ui-pb-xs, var(--ui-pb-base)));
+    --ui-pl-active: var(--ui-pl-sm, var(--ui-pl-xs, var(--ui-pl-base)));
+    --ui-m-active: var(--ui-m-sm, var(--ui-m-xs, var(--ui-m-base)));
+    --ui-mx-active: var(--ui-mx-sm, var(--ui-mx-xs, var(--ui-mx-base)));
+    --ui-my-active: var(--ui-my-sm, var(--ui-my-xs, var(--ui-my-base)));
+    --ui-mt-active: var(--ui-mt-sm, var(--ui-mt-xs, var(--ui-mt-base)));
+    --ui-mr-active: var(--ui-mr-sm, var(--ui-mr-xs, var(--ui-mr-base)));
+    --ui-mb-active: var(--ui-mb-sm, var(--ui-mb-xs, var(--ui-mb-base)));
+    --ui-ml-active: var(--ui-ml-sm, var(--ui-ml-xs, var(--ui-ml-base)));
+    --ui-w-active: var(--ui-w-sm, var(--ui-w-xs, var(--ui-w-base)));
+    --ui-h-active: var(--ui-h-sm, var(--ui-h-xs, var(--ui-h-base)));
+    --ui-maw-active: var(--ui-maw-sm, var(--ui-maw-xs, var(--ui-maw-base)));
+    --ui-mih-active: var(--ui-mih-sm, var(--ui-mih-xs, var(--ui-mih-base)));
+    --ui-gap-active: var(--ui-gap-sm, var(--ui-gap-xs, var(--ui-gap-base)));
+  }
+
+  .uiSimpleGrid {
+    grid-template-columns: repeat(var(--ui-cols-sm, var(--ui-cols-xs, var(--ui-cols-base, 1))), minmax(0, 1fr));
+    gap: var(--ui-grid-gap-sm, var(--ui-grid-gap-xs, var(--ui-grid-gap-base, var(--space-3))));
+  }
+
+  .uiGridCol {
+    grid-column: span var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12))) / span var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12)));
+  }
+}
+
+@media (min-width: 62em) {
+  :where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+    --ui-p-active: var(--ui-p-md, var(--ui-p-sm, var(--ui-p-xs, var(--ui-p-base))));
+    --ui-px-active: var(--ui-px-md, var(--ui-px-sm, var(--ui-px-xs, var(--ui-px-base))));
+    --ui-py-active: var(--ui-py-md, var(--ui-py-sm, var(--ui-py-xs, var(--ui-py-base))));
+    --ui-pt-active: var(--ui-pt-md, var(--ui-pt-sm, var(--ui-pt-xs, var(--ui-pt-base))));
+    --ui-pr-active: var(--ui-pr-md, var(--ui-pr-sm, var(--ui-pr-xs, var(--ui-pr-base))));
+    --ui-pb-active: var(--ui-pb-md, var(--ui-pb-sm, var(--ui-pb-xs, var(--ui-pb-base))));
+    --ui-pl-active: var(--ui-pl-md, var(--ui-pl-sm, var(--ui-pl-xs, var(--ui-pl-base))));
+    --ui-m-active: var(--ui-m-md, var(--ui-m-sm, var(--ui-m-xs, var(--ui-m-base))));
+    --ui-mx-active: var(--ui-mx-md, var(--ui-mx-sm, var(--ui-mx-xs, var(--ui-mx-base))));
+    --ui-my-active: var(--ui-my-md, var(--ui-my-sm, var(--ui-my-xs, var(--ui-my-base))));
+    --ui-mt-active: var(--ui-mt-md, var(--ui-mt-sm, var(--ui-mt-xs, var(--ui-mt-base))));
+    --ui-mr-active: var(--ui-mr-md, var(--ui-mr-sm, var(--ui-mr-xs, var(--ui-mr-base))));
+    --ui-mb-active: var(--ui-mb-md, var(--ui-mb-sm, var(--ui-mb-xs, var(--ui-mb-base))));
+    --ui-ml-active: var(--ui-ml-md, var(--ui-ml-sm, var(--ui-ml-xs, var(--ui-ml-base))));
+    --ui-w-active: var(--ui-w-md, var(--ui-w-sm, var(--ui-w-xs, var(--ui-w-base))));
+    --ui-h-active: var(--ui-h-md, var(--ui-h-sm, var(--ui-h-xs, var(--ui-h-base))));
+    --ui-maw-active: var(--ui-maw-md, var(--ui-maw-sm, var(--ui-maw-xs, var(--ui-maw-base))));
+    --ui-mih-active: var(--ui-mih-md, var(--ui-mih-sm, var(--ui-mih-xs, var(--ui-mih-base))));
+    --ui-gap-active: var(--ui-gap-md, var(--ui-gap-sm, var(--ui-gap-xs, var(--ui-gap-base))));
+  }
+
+  .uiSimpleGrid {
+    grid-template-columns: repeat(var(--ui-cols-md, var(--ui-cols-sm, var(--ui-cols-xs, var(--ui-cols-base, 1)))), minmax(0, 1fr));
+    gap: var(--ui-grid-gap-md, var(--ui-grid-gap-sm, var(--ui-grid-gap-xs, var(--ui-grid-gap-base, var(--space-3)))));
+  }
+
+  .uiGridCol {
+    grid-column: span var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12)))) / span var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12))));
+  }
+}
+
+@media (min-width: 75em) {
+  :where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+    --ui-p-active: var(--ui-p-lg, var(--ui-p-md, var(--ui-p-sm, var(--ui-p-xs, var(--ui-p-base)))));
+    --ui-px-active: var(--ui-px-lg, var(--ui-px-md, var(--ui-px-sm, var(--ui-px-xs, var(--ui-px-base)))));
+    --ui-py-active: var(--ui-py-lg, var(--ui-py-md, var(--ui-py-sm, var(--ui-py-xs, var(--ui-py-base)))));
+    --ui-pt-active: var(--ui-pt-lg, var(--ui-pt-md, var(--ui-pt-sm, var(--ui-pt-xs, var(--ui-pt-base)))));
+    --ui-pr-active: var(--ui-pr-lg, var(--ui-pr-md, var(--ui-pr-sm, var(--ui-pr-xs, var(--ui-pr-base)))));
+    --ui-pb-active: var(--ui-pb-lg, var(--ui-pb-md, var(--ui-pb-sm, var(--ui-pb-xs, var(--ui-pb-base)))));
+    --ui-pl-active: var(--ui-pl-lg, var(--ui-pl-md, var(--ui-pl-sm, var(--ui-pl-xs, var(--ui-pl-base)))));
+    --ui-m-active: var(--ui-m-lg, var(--ui-m-md, var(--ui-m-sm, var(--ui-m-xs, var(--ui-m-base)))));
+    --ui-mx-active: var(--ui-mx-lg, var(--ui-mx-md, var(--ui-mx-sm, var(--ui-mx-xs, var(--ui-mx-base)))));
+    --ui-my-active: var(--ui-my-lg, var(--ui-my-md, var(--ui-my-sm, var(--ui-my-xs, var(--ui-my-base)))));
+    --ui-mt-active: var(--ui-mt-lg, var(--ui-mt-md, var(--ui-mt-sm, var(--ui-mt-xs, var(--ui-mt-base)))));
+    --ui-mr-active: var(--ui-mr-lg, var(--ui-mr-md, var(--ui-mr-sm, var(--ui-mr-xs, var(--ui-mr-base)))));
+    --ui-mb-active: var(--ui-mb-lg, var(--ui-mb-md, var(--ui-mb-sm, var(--ui-mb-xs, var(--ui-mb-base)))));
+    --ui-ml-active: var(--ui-ml-lg, var(--ui-ml-md, var(--ui-ml-sm, var(--ui-ml-xs, var(--ui-ml-base)))));
+    --ui-w-active: var(--ui-w-lg, var(--ui-w-md, var(--ui-w-sm, var(--ui-w-xs, var(--ui-w-base)))));
+    --ui-h-active: var(--ui-h-lg, var(--ui-h-md, var(--ui-h-sm, var(--ui-h-xs, var(--ui-h-base)))));
+    --ui-maw-active: var(--ui-maw-lg, var(--ui-maw-md, var(--ui-maw-sm, var(--ui-maw-xs, var(--ui-maw-base)))));
+    --ui-mih-active: var(--ui-mih-lg, var(--ui-mih-md, var(--ui-mih-sm, var(--ui-mih-xs, var(--ui-mih-base)))));
+    --ui-gap-active: var(--ui-gap-lg, var(--ui-gap-md, var(--ui-gap-sm, var(--ui-gap-xs, var(--ui-gap-base)))));
+  }
+
+  .uiSimpleGrid {
+    grid-template-columns: repeat(var(--ui-cols-lg, var(--ui-cols-md, var(--ui-cols-sm, var(--ui-cols-xs, var(--ui-cols-base, 1))))), minmax(0, 1fr));
+    gap: var(--ui-grid-gap-lg, var(--ui-grid-gap-md, var(--ui-grid-gap-sm, var(--ui-grid-gap-xs, var(--ui-grid-gap-base, var(--space-3))))));
+  }
+
+  .uiGridCol {
+    grid-column: span var(--ui-span-lg, var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12))))) / span var(--ui-span-lg, var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12)))));
+  }
+}
+
+@media (min-width: 88em) {
+  :where(.uiResponsive, .uiField, .uiCheckLabel, .uiTabsPanel) {
+    --ui-p-active: var(--ui-p-xl, var(--ui-p-lg, var(--ui-p-md, var(--ui-p-sm, var(--ui-p-xs, var(--ui-p-base))))));
+    --ui-px-active: var(--ui-px-xl, var(--ui-px-lg, var(--ui-px-md, var(--ui-px-sm, var(--ui-px-xs, var(--ui-px-base))))));
+    --ui-py-active: var(--ui-py-xl, var(--ui-py-lg, var(--ui-py-md, var(--ui-py-sm, var(--ui-py-xs, var(--ui-py-base))))));
+    --ui-pt-active: var(--ui-pt-xl, var(--ui-pt-lg, var(--ui-pt-md, var(--ui-pt-sm, var(--ui-pt-xs, var(--ui-pt-base))))));
+    --ui-pr-active: var(--ui-pr-xl, var(--ui-pr-lg, var(--ui-pr-md, var(--ui-pr-sm, var(--ui-pr-xs, var(--ui-pr-base))))));
+    --ui-pb-active: var(--ui-pb-xl, var(--ui-pb-lg, var(--ui-pb-md, var(--ui-pb-sm, var(--ui-pb-xs, var(--ui-pb-base))))));
+    --ui-pl-active: var(--ui-pl-xl, var(--ui-pl-lg, var(--ui-pl-md, var(--ui-pl-sm, var(--ui-pl-xs, var(--ui-pl-base))))));
+    --ui-m-active: var(--ui-m-xl, var(--ui-m-lg, var(--ui-m-md, var(--ui-m-sm, var(--ui-m-xs, var(--ui-m-base))))));
+    --ui-mx-active: var(--ui-mx-xl, var(--ui-mx-lg, var(--ui-mx-md, var(--ui-mx-sm, var(--ui-mx-xs, var(--ui-mx-base))))));
+    --ui-my-active: var(--ui-my-xl, var(--ui-my-lg, var(--ui-my-md, var(--ui-my-sm, var(--ui-my-xs, var(--ui-my-base))))));
+    --ui-mt-active: var(--ui-mt-xl, var(--ui-mt-lg, var(--ui-mt-md, var(--ui-mt-sm, var(--ui-mt-xs, var(--ui-mt-base))))));
+    --ui-mr-active: var(--ui-mr-xl, var(--ui-mr-lg, var(--ui-mr-md, var(--ui-mr-sm, var(--ui-mr-xs, var(--ui-mr-base))))));
+    --ui-mb-active: var(--ui-mb-xl, var(--ui-mb-lg, var(--ui-mb-md, var(--ui-mb-sm, var(--ui-mb-xs, var(--ui-mb-base))))));
+    --ui-ml-active: var(--ui-ml-xl, var(--ui-ml-lg, var(--ui-ml-md, var(--ui-ml-sm, var(--ui-ml-xs, var(--ui-ml-base))))));
+    --ui-w-active: var(--ui-w-xl, var(--ui-w-lg, var(--ui-w-md, var(--ui-w-sm, var(--ui-w-xs, var(--ui-w-base))))));
+    --ui-h-active: var(--ui-h-xl, var(--ui-h-lg, var(--ui-h-md, var(--ui-h-sm, var(--ui-h-xs, var(--ui-h-base))))));
+    --ui-maw-active: var(--ui-maw-xl, var(--ui-maw-lg, var(--ui-maw-md, var(--ui-maw-sm, var(--ui-maw-xs, var(--ui-maw-base))))));
+    --ui-mih-active: var(--ui-mih-xl, var(--ui-mih-lg, var(--ui-mih-md, var(--ui-mih-sm, var(--ui-mih-xs, var(--ui-mih-base))))));
+    --ui-gap-active: var(--ui-gap-xl, var(--ui-gap-lg, var(--ui-gap-md, var(--ui-gap-sm, var(--ui-gap-xs, var(--ui-gap-base))))));
+  }
+
+  .uiSimpleGrid {
+    grid-template-columns: repeat(var(--ui-cols-xl, var(--ui-cols-lg, var(--ui-cols-md, var(--ui-cols-sm, var(--ui-cols-xs, var(--ui-cols-base, 1)))))), minmax(0, 1fr));
+    gap: var(--ui-grid-gap-xl, var(--ui-grid-gap-lg, var(--ui-grid-gap-md, var(--ui-grid-gap-sm, var(--ui-grid-gap-xs, var(--ui-grid-gap-base, var(--space-3)))))));
+  }
+
+  .uiGridCol {
+    grid-column: span var(--ui-span-xl, var(--ui-span-lg, var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12)))))) / span var(--ui-span-xl, var(--ui-span-lg, var(--ui-span-md, var(--ui-span-sm, var(--ui-span-xs, var(--ui-span-base, 12))))));
+  }
+}
+
+.uiField {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.uiFieldLabel {
+  color: var(--gray-12);
+  font-size: var(--font-size-2);
+  font-weight: 500;
+}
+
+.uiFieldDescription,
+.uiFieldError {
+  font-size: var(--font-size-1);
+  line-height: 1.35;
+}
+
+.uiFieldDescription {
+  color: var(--gray-10);
+}
+
+.uiFieldError {
+  color: var(--red-10);
+}
+
+.uiControlWithSections {
+  position: relative;
+  min-width: 0;
+}
+
+.uiControlWithSections > .uiLeftSection,
+.uiControlWithSections > .uiRightSection {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.uiControlWithSections > .uiLeftSection {
+  left: var(--space-2);
+}
+
+.uiControlWithSections > .uiRightSection {
+  right: var(--space-2);
+}
+
+.uiControlWithSections[data-left='true'] input {
+  padding-left: 2.1rem;
+}
+
+.uiControlWithSections[data-right='true'] input {
+  padding-right: 2.1rem;
+}
+
+.uiCheckLabel,
+.uiRadioLabel {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--gray-12);
+  font-size: var(--font-size-2);
+  cursor: pointer;
+}
+
+.uiCheckCopy {
+  display: grid;
+  gap: 2px;
+}
+
+.uiTagsControl {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.5rem;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--gray-a7);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+}
+
+.uiTagsControl:focus-within {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -1px;
+}
+
+.uiTagsInput {
+  min-width: 9rem;
+  flex: 1 1 9rem;
+  padding: var(--space-1);
+  border: 0;
+  outline: 0;
+  color: var(--gray-12);
+  background: transparent;
+  font: inherit;
+}
+
+.uiTag {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+  gap: 2px;
+  align-items: center;
+}
+
+.uiTagLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uiTagRemove {
+  display: inline-grid;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.uiMultiSelectTrigger {
+  width: 100%;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.uiMultiSelectValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uiTabsPanel[data-state='inactive'] {
+  display: none;
+}
+
+.uiTabsList[data-orientation='vertical'] {
+  flex-direction: column;
+  align-items: stretch;
+  overflow: visible;
+}
+
+.uiTabsList[data-orientation='vertical'] .rt-BaseTabListTrigger {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+:where(.uiUnstyledButton) {
+  padding: 0;
+  border: 0;
+  appearance: none;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.uiModalContent,
+.uiDrawerContent {
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+}
+
+.uiModalContent[data-full-screen='true'] {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  border-radius: 0;
+}
+
+.uiDrawerContent {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--ui-drawer-size, min(88vw, 360px));
+  max-height: 100dvh;
+  border-radius: 0;
+  transform: none;
+}
+
+.uiDrawerContent[data-position='left'] {
+  left: 0;
+}
+
+.uiDrawerContent[data-position='right'] {
+  right: 0;
+}
+
+.uiDialogHeader {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.uiDialogClose {
+  margin-left: auto;
+}
+
+.uiAccordionTrigger {
+  display: flex;
+  width: 100%;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3);
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.uiAccordionPanel {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.uiCollapse[data-state='closed'] {
+  display: none;
+}
+
+.uiBurgerLines,
+.uiBurgerLines::before,
+.uiBurgerLines::after {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 99px;
+  background: currentColor;
+  content: '';
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.uiBurgerLines {
+  position: relative;
+}
+
+.uiBurgerLines::before,
+.uiBurgerLines::after {
+  position: absolute;
+  left: 0;
+}
+
+.uiBurgerLines::before {
+  top: -6px;
+}
+
+.uiBurgerLines::after {
+  top: 6px;
+}
+
+.uiBurgerLines[data-opened='true'] {
+  background: transparent;
+}
+
+.uiBurgerLines[data-opened='true']::before {
+  top: 0;
+  transform: rotate(45deg);
+}
+
+.uiBurgerLines[data-opened='true']::after {
+  top: 0;
+  transform: rotate(-45deg);
+}
+
+.uiLineClamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.uiButtonLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

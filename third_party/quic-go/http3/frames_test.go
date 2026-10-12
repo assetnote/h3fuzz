@@ -1,0 +1,515 @@
+package http3
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3/qlog"
+	"github.com/quic-go/quic-go/qlogwriter"
+	"github.com/quic-go/quic-go/quicvarint"
+	"github.com/quic-go/quic-go/testutils/events"
+
+	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
+
+	"github.com/stretchr/testify/require"
+)
+
+func testFrameParserEOF(t *testing.T, data []byte) {
+	t.Helper()
+	for i := range data {
+		b := make([]byte, i)
+		copy(b, data[:i])
+		fp := frameParser{r: bytes.NewReader(b)}
+		_, err := fp.ParseNext(nil)
+		require.ErrorIs(t, err, io.EOF)
+	}
+}
+
+func TestParserReservedFrameType(t *testing.T) {
+	for _, ft := range []uint64{0x2, 0x6, 0x8, 0x9} {
+		t.Run(fmt.Sprintf("type %#x", ft), func(t *testing.T) {
+			var eventRecorder events.Recorder
+			client, server := newConnPair(t, withDatagrams(), withServerRecorder(&eventRecorder))
+
+			data := quicvarint.Append(nil, ft)
+			data = quicvarint.Append(data, 6)
+			data = append(data, []byte("foobar")...)
+
+			fp := frameParser{
+				streamID:  42,
+				r:         bytes.NewReader(data),
+				closeConn: client.CloseWithError,
+			}
+			_, err := fp.ParseNext(&eventRecorder)
+			require.ErrorContains(t, err, "http3: reserved frame type")
+
+			select {
+			case <-server.Context().Done():
+				require.ErrorIs(t,
+					context.Cause(server.Context()),
+					&quic.ApplicationError{Remote: true, ErrorCode: quic.ApplicationErrorCode(ErrCodeFrameUnexpected)},
+				)
+			case <-time.After(time.Second):
+				t.Fatal("timeout")
+			}
+
+			require.Equal(t,
+				[]qlogwriter.Event{
+					qlog.FrameParsed{
+						StreamID: 42,
+						Raw:      qlog.RawInfo{Length: len(data), PayloadLength: 6},
+						Frame:    qlog.Frame{Frame: qlog.ReservedFrame{Type: ft}},
+					},
+				},
+				eventRecorder.Events(qlog.FrameParsed{}),
+			)
+		})
+	}
+}
+
+func TestParserUnknownFrameType(t *testing.T) {
+	data := quicvarint.Append(nil, 0xdead)
+	data = quicvarint.Append(data, 6)
+	data = append(data, []byte("foobar")...)
+	data = quicvarint.Append(data, 0xbeef)
+	data = quicvarint.Append(data, 3)
+	data = append(data, []byte("baz")...)
+	hf := &headersFrame{Length: 3}
+	data = hf.Append(data)
+	data = append(data, []byte("foo")...)
+
+	r := bytes.NewReader(data)
+	fp := frameParser{r: r}
+	f, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &headersFrame{}, f)
+	hf = f.(*headersFrame)
+	require.Equal(t, uint64(3), hf.Length)
+	payload := make([]byte, 3)
+	_, err = io.ReadFull(r, payload)
+	require.NoError(t, err)
+	require.Equal(t, []byte("foo"), payload)
+}
+
+func TestParserUnsupportedFrameTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ft   uint64
+		qf   any
+	}{
+		{name: "CANCEL_PUSH", ft: 0x3, qf: qlog.CancelPushFrame{}},
+		{name: "PUSH_PROMISE", ft: 0x5, qf: qlog.PushPromiseFrame{}},
+		{name: "MAX_PUSH_ID", ft: 0xd, qf: qlog.MaxPushIDFrame{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var eventRecorder events.Recorder
+
+			data := quicvarint.Append(nil, tc.ft)
+			data = quicvarint.Append(data, 6)
+			data = append(data, []byte("foobar")...)
+			df := &dataFrame{Length: 3}
+			data = df.Append(data)
+			data = append(data, []byte("foo")...)
+
+			r := bytes.NewReader(data)
+			fp := frameParser{streamID: 42, r: r}
+
+			f, err := fp.ParseNext(&eventRecorder)
+			require.NoError(t, err)
+			require.IsType(t, &dataFrame{}, f)
+			df = f.(*dataFrame)
+			require.Equal(t, uint64(3), df.Length)
+			payload := make([]byte, 3)
+			_, err = io.ReadFull(r, payload)
+			require.NoError(t, err)
+			require.Equal(t, []byte("foo"), payload)
+
+			headerLen := quicvarint.Len(tc.ft) + quicvarint.Len(6)
+			dfLen, _ := expectedFrameLength(t, df)
+			require.Equal(t,
+				[]qlogwriter.Event{
+					qlog.FrameParsed{
+						StreamID: 42,
+						Raw:      qlog.RawInfo{Length: headerLen, PayloadLength: 6},
+						Frame:    qlog.Frame{Frame: tc.qf},
+					},
+					qlog.FrameParsed{
+						StreamID: 42,
+						Raw:      qlog.RawInfo{Length: dfLen, PayloadLength: 3},
+						Frame:    qlog.Frame{Frame: qlog.DataFrame{}},
+					},
+				},
+				eventRecorder.Events(qlog.FrameParsed{}),
+			)
+		})
+	}
+}
+
+func TestParserHeadersFrame(t *testing.T) {
+	data := quicvarint.Append(nil, 1) // type byte
+	data = quicvarint.Append(data, 0x1337)
+	fp := frameParser{r: bytes.NewReader(data)}
+
+	// incomplete data results in an io.EOF
+	testFrameParserEOF(t, data)
+
+	// parse
+	f1, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &headersFrame{}, f1)
+	require.Equal(t, uint64(0x1337), f1.(*headersFrame).Length)
+
+	// write and parse
+	fp = frameParser{r: bytes.NewReader(f1.(*headersFrame).Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, f1, f2)
+}
+
+func TestDataFrame(t *testing.T) {
+	data := quicvarint.Append(nil, 0) // type byte
+	data = quicvarint.Append(data, 0x1337)
+	fp := frameParser{r: bytes.NewReader(data)}
+
+	// incomplete data results in an io.EOF
+	testFrameParserEOF(t, data)
+
+	// parse
+	f1, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &dataFrame{}, f1)
+	require.Equal(t, uint64(0x1337), f1.(*dataFrame).Length)
+
+	// write and parse
+	fp = frameParser{r: bytes.NewReader(f1.(*dataFrame).Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, f1, f2)
+}
+
+func appendSetting(b []byte, key, value uint64) []byte {
+	b = quicvarint.Append(b, key)
+	b = quicvarint.Append(b, value)
+	return b
+}
+
+func TestParserSettingsFrame(t *testing.T) {
+	settings := appendSetting(nil, 13, 37)
+	settings = appendSetting(settings, 0xdead, 0xbeef)
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+
+	// incomplete data results in an io.EOF
+	testFrameParserEOF(t, data)
+
+	fp := frameParser{r: bytes.NewReader(data)}
+	frame, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &settingsFrame{}, frame)
+	sf := frame.(*settingsFrame)
+	require.Len(t, sf.Other, 2)
+	require.Equal(t, uint64(37), sf.Other[uint64(13)])
+	require.Equal(t, uint64(0xbeef), sf.Other[uint64(0xdead)])
+
+	// write and parse
+	fp = frameParser{r: bytes.NewReader(sf.Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &settingsFrame{}, f2)
+	sf2 := f2.(*settingsFrame)
+	require.Len(t, sf2.Other, len(sf.Other))
+	require.Equal(t, sf.Other, sf2.Other)
+}
+
+func TestParserSettingsFrameDuplicateSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		num  uint64
+		val  uint64
+	}{
+		{
+			name: "other setting",
+			num:  13,
+			val:  37,
+		},
+		{
+			name: "extended connect",
+			num:  settingExtendedConnect,
+			val:  1,
+		},
+		{
+			name: "max field section size",
+			num:  settingMaxFieldSectionSize,
+			val:  1337,
+		},
+		{
+			name: "datagram",
+			num:  settingDatagram,
+			val:  1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := appendSetting(nil, tc.num, tc.val)
+			settings = appendSetting(settings, tc.num, tc.val)
+			data := quicvarint.Append(nil, 4) // type byte
+			data = quicvarint.Append(data, uint64(len(settings)))
+			data = append(data, settings...)
+			fp := frameParser{r: bytes.NewReader(data)}
+			_, err := fp.ParseNext(nil)
+			require.EqualError(t, err, fmt.Sprintf("duplicate setting: %d", tc.num))
+		})
+	}
+}
+
+func TestParserSettingsFrameMaxFieldSectionSize(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		testParserSettingsFrameMaxFieldSectionSize(t, false)
+	})
+
+	t.Run("with value", func(t *testing.T) {
+		testParserSettingsFrameMaxFieldSectionSize(t, true)
+	})
+}
+
+func testParserSettingsFrameMaxFieldSectionSize(t *testing.T, present bool) {
+	var settings []byte
+	if present {
+		settings = appendSetting(nil, settingMaxFieldSectionSize, 1337)
+	}
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+
+	fp := frameParser{r: bytes.NewReader(data)}
+	f, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &settingsFrame{}, f)
+	sf := f.(*settingsFrame)
+	if present {
+		require.EqualValues(t, 1337, sf.MaxFieldSectionSize)
+	} else {
+		require.EqualValues(t, -1, sf.MaxFieldSectionSize)
+	}
+
+	fp = frameParser{r: bytes.NewReader(sf.Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, sf, f2)
+}
+
+func TestParserSettingsFrameDatagram(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		testParserSettingsFrameDatagram(t, true)
+	})
+	t.Run("disabled", func(t *testing.T) {
+		testParserSettingsFrameDatagram(t, false)
+	})
+}
+
+func testParserSettingsFrameDatagram(t *testing.T, enabled bool) {
+	var settings []byte
+	switch enabled {
+	case true:
+		settings = appendSetting(nil, settingDatagram, 1)
+	case false:
+		settings = appendSetting(nil, settingDatagram, 0)
+	}
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+
+	fp := frameParser{r: bytes.NewReader(data)}
+	f, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &settingsFrame{}, f)
+	sf := f.(*settingsFrame)
+	require.Equal(t, enabled, sf.Datagram)
+
+	fp = frameParser{r: bytes.NewReader(sf.Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, sf, f2)
+}
+
+func TestParserSettingsFrameDatagramInvalidValue(t *testing.T) {
+	settings := quicvarint.Append(nil, settingDatagram)
+	settings = quicvarint.Append(settings, 1337)
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+	fp := frameParser{r: bytes.NewReader(data)}
+	_, err := fp.ParseNext(nil)
+	require.EqualError(t, err, "invalid value for SETTINGS_H3_DATAGRAM: 1337")
+}
+
+func TestParserSettingsFrameExtendedConnect(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		testParserSettingsFrameExtendedConnect(t, true)
+	})
+	t.Run("disabled", func(t *testing.T) {
+		testParserSettingsFrameExtendedConnect(t, false)
+	})
+}
+
+func testParserSettingsFrameExtendedConnect(t *testing.T, enabled bool) {
+	var settings []byte
+	switch enabled {
+	case true:
+		settings = appendSetting(nil, settingExtendedConnect, 1)
+	case false:
+		settings = appendSetting(nil, settingExtendedConnect, 0)
+	}
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+
+	fp := frameParser{r: bytes.NewReader(data)}
+	f, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &settingsFrame{}, f)
+	sf := f.(*settingsFrame)
+	require.Equal(t, enabled, sf.ExtendedConnect)
+
+	fp = frameParser{r: bytes.NewReader(sf.Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, sf, f2)
+}
+
+func TestParserSettingsFrameExtendedConnectInvalidValue(t *testing.T) {
+	settings := quicvarint.Append(nil, settingExtendedConnect)
+	settings = quicvarint.Append(settings, 1337)
+	data := quicvarint.Append(nil, 4) // type byte
+	data = quicvarint.Append(data, uint64(len(settings)))
+	data = append(data, settings...)
+	fp := frameParser{r: bytes.NewReader(data)}
+	_, err := fp.ParseNext(nil)
+	require.EqualError(t, err, "invalid value for SETTINGS_ENABLE_CONNECT_PROTOCOL: 1337")
+}
+
+func TestParserGoAwayFrame(t *testing.T) {
+	data := quicvarint.Append(nil, 7) // type byte
+	data = quicvarint.Append(data, uint64(quicvarint.Len(100)))
+	data = quicvarint.Append(data, 100)
+
+	// incomplete data results in an io.EOF
+	testFrameParserEOF(t, data)
+
+	fp := frameParser{r: bytes.NewReader(data)}
+	f, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.IsType(t, &goAwayFrame{}, f)
+	require.Equal(t, quic.StreamID(100), f.(*goAwayFrame).StreamID)
+
+	// write and parse
+	fp = frameParser{r: bytes.NewReader(f.(*goAwayFrame).Append(nil))}
+	f2, err := fp.ParseNext(nil)
+	require.NoError(t, err)
+	require.Equal(t, f, f2)
+}
+
+func TestParserPriorityUpdateFrame(t *testing.T) {
+	var eventRecorder events.Recorder
+	frame := &priorityUpdateFrame{ElementID: 12, PriorityFieldValue: "u=1, i"}
+	payload := quicvarint.Append(nil, frame.ElementID)
+	payload = append(payload, frame.PriorityFieldValue...)
+	data := quicvarint.Append(nil, 0xf0700)
+	data = quicvarint.Append(data, uint64(len(payload)))
+	data = append(data, payload...)
+	testFrameParserEOF(t, data)
+
+	parsed, err := (&frameParser{streamID: 42, r: bytes.NewReader(data)}).ParseNext(&eventRecorder)
+	require.NoError(t, err)
+	require.Equal(t, frame, parsed)
+	require.Equal(t,
+		[]qlogwriter.Event{qlog.FrameParsed{
+			StreamID: 42,
+			Raw:      qlog.RawInfo{Length: len(data), PayloadLength: len(payload)},
+			Frame: qlog.Frame{Frame: qlog.PriorityUpdateFrame{
+				StreamID:           12,
+				PriorityFieldValue: "u=1, i",
+			}},
+		}},
+		eventRecorder.Events(qlog.FrameParsed{}),
+	)
+
+	data = quicvarint.Append(nil, 0xf0701)
+	data = quicvarint.Append(data, 42) // the payload is intentionally omitted
+	_, err = (&frameParser{r: bytes.NewReader(data)}).ParseNext(nil)
+	require.ErrorIs(t, err, errPriorityUpdateForPush)
+}
+
+func FuzzFrameParser(f *testing.F) {
+	corpus := ossfuzzseeds.New(f)
+
+	frames := []interface{ Append([]byte) []byte }{
+		&dataFrame{Length: 5},
+		&headersFrame{Length: 3},
+		&settingsFrame{
+			MaxFieldSectionSize: 1337,
+			Datagram:            true,
+			ExtendedConnect:     true,
+			Other:               map[uint64]uint64{0xdead: 0xbeef},
+		},
+		&goAwayFrame{StreamID: 42},
+	}
+	for _, fr := range frames {
+		corpus.Add(fr.Append(nil))
+	}
+
+	unknown := quicvarint.Append(nil, 0xdead)
+	unknown = quicvarint.Append(unknown, 6)
+	unknown = append(unknown, []byte("foobar")...)
+	corpus.Add(unknown)
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		fp := frameParser{
+			r:         bytes.NewReader(data),
+			closeConn: func(quic.ApplicationErrorCode, string) error { return nil },
+		}
+		for {
+			fr, err := fp.ParseNext(nil)
+			if err != nil {
+				return
+			}
+
+			switch f := fr.(type) {
+			case *dataFrame:
+				if _, err := io.CopyN(io.Discard, fp.r, int64(f.Length)); err != nil {
+					return
+				}
+			case *headersFrame:
+				// Type and length are each at least one varint byte; HTTP/3 caps the pair at frameHeaderLen.
+				if f.headerLen < 2 || f.headerLen > frameHeaderLen {
+					t.Fatalf("HEADERS: headerLen %d outside [2, %d]", f.headerLen, frameHeaderLen)
+				}
+				if _, err := io.CopyN(io.Discard, fp.r, int64(f.Length)); err != nil {
+					return
+				}
+			case *settingsFrame:
+				// Unset uses -1; a present SETTINGS_MAX_FIELD_SECTION_SIZE is non-negative (see parseSettingsFrame).
+				if f.MaxFieldSectionSize != -1 && f.MaxFieldSectionSize < 0 {
+					t.Fatalf("SETTINGS: invalid MaxFieldSectionSize %d", f.MaxFieldSectionSize)
+				}
+				// Known settings are never stored in Other on a successful parse.
+				for id := range f.Other {
+					switch id {
+					case settingMaxFieldSectionSize, settingExtendedConnect, settingDatagram:
+						t.Fatalf("SETTINGS: known setting id %#x leaked into Other", id)
+					}
+				}
+			case *goAwayFrame:
+				// QUIC stream IDs fit in 62 bits; a negative value means uint64→int64 overflow in the parser.
+				if f.StreamID < 0 {
+					t.Fatalf("GOAWAY: negative StreamID %d", f.StreamID)
+				}
+			}
+		}
+	})
+}

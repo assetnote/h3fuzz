@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetnote.invalid/h3fuzz/schemas/client-runtime-socket-v1.schema.json",
+  "title": "h3fuzz PERF-003 client runtime UDP socket sample",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "run_id",
+    "sampled_at",
+    "phase",
+    "pid",
+    "process_start_ticks",
+    "socket_inode",
+    "local_address",
+    "raw_so_rcvbuf_bytes",
+    "raw_so_sndbuf_bytes",
+    "source",
+    "linux_kernel_doubling_applies"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "client_runtime_socket"},
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "sampled_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "phase": {"enum": ["warmup", "main", "drain"]},
+    "pid": {"type": "integer", "minimum": 1},
+    "process_start_ticks": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "socket_inode": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "local_address": {"type": "string", "minLength": 1},
+    "raw_so_rcvbuf_bytes": {"type": "integer", "minimum": 0},
+    "raw_so_sndbuf_bytes": {"type": "integer", "minimum": 0},
+    "operator_requested_so_rcvbuf_bytes": {"type": "integer", "minimum": 0},
+    "operator_requested_so_sndbuf_bytes": {"type": "integer", "minimum": 0},
+    "source": {"enum": ["getsockopt", "ss"]},
+    "linux_kernel_doubling_applies": {"type": "boolean"},
+    "slot": {
+      "anyOf": [
+        {"type": "integer", "minimum": 0},
+        {"type": "null"}
+      ]
+    },
+    "shared_transport_identity": {
+      "anyOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    }
+  }
+}

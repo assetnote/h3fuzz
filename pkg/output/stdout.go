@@ -1,0 +1,622 @@
+package output
+
+import (
+	"crypto/md5"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path"
+	"sort"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/assetnote/h3fuzz/pkg/ffuf"
+)
+
+const (
+	BANNER_HEADER = `
+  h3fuzz
+  HTTP/3 content discovery
+`
+	BANNER_SEP = "________________________________________________"
+)
+
+type Stdoutput struct {
+	config           *ffuf.Config
+	fuzzkeywords     []string
+	resultMutex      sync.Mutex // guards Results, CurrentResults and paused; Result is called from worker goroutines
+	Results          []ffuf.Result
+	CurrentResults   []ffuf.Result
+	stdoutIsTerminal bool
+	stderrIsTerminal bool
+	paused           bool // when set, Result records matches but does not print them
+}
+
+func NewStdoutput(conf *ffuf.Config) *Stdoutput {
+	var outp Stdoutput
+	outp.config = conf
+	outp.Results = make([]ffuf.Result, 0)
+	outp.CurrentResults = make([]ffuf.Result, 0)
+	outp.fuzzkeywords = make([]string, 0)
+	outp.stdoutIsTerminal = isTerminal(os.Stdout)
+	outp.stderrIsTerminal = isTerminal(os.Stderr)
+	for _, ip := range conf.InputProviders {
+		outp.fuzzkeywords = append(outp.fuzzkeywords, ip.Keyword)
+	}
+	sort.Strings(outp.fuzzkeywords)
+	return &outp
+}
+
+// isTerminal reports whether f is an interactive terminal, as opposed to a
+// regular file or a pipe. This also treats other character devices (e.g.
+// /dev/null) as terminals, which is harmless here since it only affects
+// whether a handful of extra control bytes get written to a destination
+// that isn't going to be read back anyway.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// stderrClear returns the terminal control sequence used to redraw the
+// current line, or an empty string when stderr isn't an interactive
+// terminal. Without this, redirecting stderr to a file or another process
+// leaves raw control characters in the output.
+func (s *Stdoutput) stderrClear() string {
+	if s.stderrIsTerminal {
+		return TERMINAL_CLEAR_LINE
+	}
+	return ""
+}
+
+// stdoutClear is the stdout equivalent of stderrClear, used when printing
+// results that overwrite the in-progress progress bar line.
+func (s *Stdoutput) stdoutClear() string {
+	if s.stdoutIsTerminal {
+		return TERMINAL_CLEAR_LINE
+	}
+	return ""
+}
+
+// ansiClear returns the ANSI reset code used to close a color started by
+// colorize(), or an empty string when -c wasn't requested. Without this,
+// result lines carry a trailing reset code even when nothing was colored.
+func (s *Stdoutput) ansiClear() string {
+	if s.config.Colors {
+		return ANSI_CLEAR
+	}
+	return ""
+}
+
+func (s *Stdoutput) Banner() {
+	version := ffuf.FormattedVersion()
+	fmt.Fprintf(os.Stderr, "%s  Version: %s\n%s\n\n", BANNER_HEADER, version, BANNER_SEP)
+	printOption([]byte("Method"), []byte(s.config.Method))
+	printOption([]byte("URL"), []byte(s.config.Url))
+	if s.config.Http3Selected {
+		printOption([]byte("Protocol"), []byte(fmt.Sprintf("HTTP/3 (%d active connections, max %d)", s.config.Http3ConnectionsActive, s.config.Http3MaxConnections)))
+	} else {
+		protocol := "HTTP/1.1"
+		if s.config.Http2Selected {
+			protocol = "HTTP/2"
+		}
+		printOption([]byte("Protocol"), []byte(protocol))
+		if s.config.Http3Reason != "" {
+			printOption([]byte("HTTP/3"), []byte(s.config.Http3Reason))
+		}
+	}
+	if s.config.ResponseOptimizationStrategy != "" {
+		printOption([]byte("Response mode"), []byte(s.config.ResponseOptimizationStrategy+": "+s.config.ResponseOptimizationReason))
+	}
+
+	// Print wordlists
+	for _, provider := range s.config.InputProviders {
+		if provider.Name == "wordlist" {
+			printOption([]byte("Wordlist"), []byte(provider.Keyword+": "+provider.Value))
+		}
+	}
+
+	// Print headers
+	if len(s.config.Headers) > 0 {
+		for k, v := range s.config.Headers {
+			printOption([]byte("Header"), []byte(fmt.Sprintf("%s: %s", k, v)))
+		}
+	}
+	// Print POST data
+	if len(s.config.Data) > 0 {
+		printOption([]byte("Data"), []byte(s.config.Data))
+	}
+
+	// Print extensions
+	if len(s.config.Extensions) > 0 {
+		exts := ""
+		for _, ext := range s.config.Extensions {
+			exts = fmt.Sprintf("%s%s ", exts, ext)
+		}
+		printOption([]byte("Extensions"), []byte(exts))
+	}
+
+	// Output file info
+	if len(s.config.OutputFile) > 0 {
+
+		// Use filename as specified by user
+		OutputFile := s.config.OutputFile
+
+		if s.config.OutputFormat == "all" {
+			// Actually... append all extensions
+			OutputFile += ".{json,ejson,html,md,csv,ecsv}"
+		}
+
+		printOption([]byte("Output file"), []byte(OutputFile))
+		printOption([]byte("File format"), []byte(s.config.OutputFormat))
+	}
+
+	// Follow redirects?
+	follow := fmt.Sprintf("%t", s.config.FollowRedirects)
+	printOption([]byte("Follow redirects"), []byte(follow))
+
+	// Autocalibration
+	autocalib := fmt.Sprintf("%t", s.config.AutoCalibration)
+	printOption([]byte("Calibration"), []byte(autocalib))
+
+	// Proxies
+	if len(s.config.ProxyURL) > 0 {
+		printOption([]byte("Proxy"), []byte(s.config.ProxyURL))
+	}
+	if len(s.config.ReplayProxyURL) > 0 {
+		printOption([]byte("ReplayProxy"), []byte(s.config.ReplayProxyURL))
+	}
+
+	// Timeout
+	timeout := fmt.Sprintf("%d", s.config.Timeout)
+	printOption([]byte("Timeout"), []byte(timeout))
+
+	// Threads
+	threads := fmt.Sprintf("%d", s.config.Threads)
+	printOption([]byte("Threads"), []byte(threads))
+
+	// Delay?
+	if s.config.Delay.HasDelay {
+		delay := ""
+		if s.config.Delay.IsRange {
+			delay = fmt.Sprintf("%.2f - %.2f seconds", s.config.Delay.Min, s.config.Delay.Max)
+		} else {
+			delay = fmt.Sprintf("%.2f seconds", s.config.Delay.Min)
+		}
+		printOption([]byte("Delay"), []byte(delay))
+	}
+
+	// Print matchers
+	for _, f := range s.config.MatcherManager.GetMatchers() {
+		printOption([]byte("Matcher"), []byte(f.ReprVerbose()))
+	}
+	// Print filters
+	for _, f := range s.config.MatcherManager.GetFilters() {
+		printOption([]byte("Filter"), []byte(f.ReprVerbose()))
+	}
+	fmt.Fprintf(os.Stderr, "%s\n\n", BANNER_SEP)
+}
+
+// Reset resets the result slice
+func (s *Stdoutput) Reset() {
+	s.resultMutex.Lock()
+	s.CurrentResults = make([]ffuf.Result, 0)
+	s.resultMutex.Unlock()
+}
+
+// Cycle moves the CurrentResults to Results and resets the results slice
+func (s *Stdoutput) Cycle() {
+	s.resultMutex.Lock()
+	s.Results = append(s.Results, s.CurrentResults...)
+	s.CurrentResults = make([]ffuf.Result, 0)
+	s.resultMutex.Unlock()
+}
+
+// GetResults returns the result slice
+func (s *Stdoutput) GetCurrentResults() []ffuf.Result {
+	s.resultMutex.Lock()
+	defer s.resultMutex.Unlock()
+	out := make([]ffuf.Result, len(s.CurrentResults))
+	copy(out, s.CurrentResults)
+	return out
+}
+
+// SetResults sets the result slice
+func (s *Stdoutput) SetCurrentResults(results []ffuf.Result) {
+	s.resultMutex.Lock()
+	s.CurrentResults = results
+	s.resultMutex.Unlock()
+}
+
+// FilterCurrentResults keeps only the results for which keep returns true. The
+// read-filter-write runs under resultMutex, so a concurrent Result() append is
+// not lost through a stale snapshot the way a caller-side GetCurrentResults /
+// SetCurrentResults pair would drop it.
+func (s *Stdoutput) FilterCurrentResults(keep func(ffuf.Result) bool) {
+	s.resultMutex.Lock()
+	defer s.resultMutex.Unlock()
+	filtered := make([]ffuf.Result, 0, len(s.CurrentResults))
+	for _, r := range s.CurrentResults {
+		if keep(r) {
+			filtered = append(filtered, r)
+		}
+	}
+	s.CurrentResults = filtered
+}
+
+func (s *Stdoutput) Progress(status ffuf.Progress) {
+	if s.config.Quiet {
+		// No progress for quiet mode
+		return
+	}
+
+	dur := time.Since(status.StartedAt)
+	// RateThrottle already withholds a value until it has a real sample and then
+	// smooths it over a rolling window. Hiding that value for the first full
+	// second made a healthy high-rate run appear stalled at 0 req/sec.
+	reqRate := status.ReqSec
+
+	hours := dur / time.Hour
+	dur -= hours * time.Hour
+	mins := dur / time.Minute
+	dur -= mins * time.Minute
+	secs := dur / time.Second
+
+	fmt.Fprintf(os.Stderr, "%s:: Progress: [%d/%d] :: Job [%d/%d] :: %d req/sec :: Duration: [%d:%02d:%02d] :: Errors: %d ::", s.stderrClear(), status.ReqCount, status.ReqTotal, status.QueuePos, status.QueueTotal, reqRate, hours, mins, secs, status.ErrorCount)
+}
+
+func (s *Stdoutput) Info(infostring string) {
+	if s.config.Quiet {
+		fmt.Fprintf(os.Stderr, "%s", infostring)
+	} else {
+		if !s.config.Colors {
+			fmt.Fprintf(os.Stderr, "%s[INFO] %s\n\n", s.stderrClear(), infostring)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s[%sINFO%s] %s\n\n", s.stderrClear(), ANSI_BLUE, ANSI_CLEAR, infostring)
+		}
+	}
+}
+
+func (s *Stdoutput) Error(errstring string) {
+	if s.config.Quiet {
+		fmt.Fprintf(os.Stderr, "%s", errstring)
+	} else {
+		if !s.config.Colors {
+			fmt.Fprintf(os.Stderr, "%s[ERR] %s\n", s.stderrClear(), errstring)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s[%sERR%s] %s\n", s.stderrClear(), ANSI_RED, ANSI_CLEAR, errstring)
+		}
+	}
+}
+
+func (s *Stdoutput) Warning(warnstring string) {
+	if s.config.Quiet {
+		fmt.Fprintf(os.Stderr, "%s", warnstring)
+	} else {
+		if !s.config.Colors {
+			fmt.Fprintf(os.Stderr, "%s[WARN] %s\n", s.stderrClear(), warnstring)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s[%sWARN%s] %s\n", s.stderrClear(), ANSI_RED, ANSI_CLEAR, warnstring)
+		}
+	}
+}
+
+func (s *Stdoutput) Raw(output string) {
+	fmt.Fprintf(os.Stderr, "%s%s", s.stderrClear(), output)
+}
+
+func (s *Stdoutput) writeToAll(filename string, config *ffuf.Config, res []ffuf.Result) error {
+	var err error
+	var BaseFilename string = s.config.OutputFile
+
+	// Go through each type of write, adding
+	// the suffix to each output file.
+
+	s.config.OutputFile = BaseFilename + ".json"
+	err = writeJSON(s.config.OutputFile, s.config, res)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	s.config.OutputFile = BaseFilename + ".ejson"
+	err = writeEJSON(s.config.OutputFile, s.config, res)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	s.config.OutputFile = BaseFilename + ".html"
+	err = writeHTML(s.config.OutputFile, s.config, res)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	s.config.OutputFile = BaseFilename + ".md"
+	err = writeMarkdown(s.config.OutputFile, s.config, res)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	s.config.OutputFile = BaseFilename + ".csv"
+	err = writeCSV(s.config.OutputFile, s.config, res, false)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	s.config.OutputFile = BaseFilename + ".ecsv"
+	err = writeCSV(s.config.OutputFile, s.config, res, true)
+	if err != nil {
+		s.Error(err.Error())
+	}
+
+	return nil
+
+}
+
+// SaveFile saves the current results to a file of a given type
+func (s *Stdoutput) SaveFile(filename, format string) error {
+	var err error
+	// Snapshot the results under the lock so a concurrent Result() cannot race the
+	// file writers, then write outside the lock.
+	s.resultMutex.Lock()
+	all := make([]ffuf.Result, 0, len(s.Results)+len(s.CurrentResults))
+	all = append(all, s.Results...)
+	all = append(all, s.CurrentResults...)
+	s.resultMutex.Unlock()
+
+	if s.config.OutputSkipEmptyFile && len(all) == 0 {
+		s.Info("No results and -or defined, output file not written.")
+		return err
+	}
+	switch format {
+	case "all":
+		err = s.writeToAll(filename, s.config, all)
+	case "json":
+		err = writeJSON(filename, s.config, all)
+	case "ejson":
+		err = writeEJSON(filename, s.config, all)
+	case "html":
+		err = writeHTML(filename, s.config, all)
+	case "md":
+		err = writeMarkdown(filename, s.config, all)
+	case "csv":
+		err = writeCSV(filename, s.config, all, false)
+	case "ecsv":
+		err = writeCSV(filename, s.config, all, true)
+	}
+	return err
+}
+
+// Finalize gets run after all the ffuf jobs are completed
+func (s *Stdoutput) Finalize() error {
+	var err error
+	if s.config.OutputFile != "" {
+		err = s.SaveFile(s.config.OutputFile, s.config.OutputFormat)
+		if err != nil {
+			s.Error(err.Error())
+		}
+	}
+	if !s.config.Quiet {
+		fmt.Fprintf(os.Stderr, "\n")
+	}
+	return nil
+}
+
+func (s *Stdoutput) Result(resp ffuf.Response) {
+	// Do we want to write request and response to a file
+	if len(s.config.OutputDirectory) > 0 {
+		resp.ResultFile = s.writeResultToFile(resp)
+	}
+
+	inputs := make(map[string][]byte, len(resp.Request.Input))
+	for k, v := range resp.Request.Input {
+		inputs[k] = v
+	}
+	sResult := ffuf.Result{
+		Input:            inputs,
+		Position:         resp.Request.Position,
+		StatusCode:       resp.StatusCode,
+		ContentLength:    resp.ContentLength,
+		ContentWords:     resp.ContentWords,
+		ContentLines:     resp.ContentLines,
+		ContentType:      resp.ContentType,
+		RedirectLocation: resp.GetRedirectLocation(false),
+		ScraperData:      resp.ScraperData,
+		Url:              resp.Request.Url,
+		Duration:         resp.Duration,
+		ResultFile:       resp.ResultFile,
+		Host:             resp.Request.Host,
+	}
+	s.resultMutex.Lock()
+	paused := s.paused
+	// Printed is the single source of truth for the pending count. Mark it under
+	// the same lock as the append, so a later filter change that prunes this
+	// result from CurrentResults (via FilterCurrentResults) also removes it from
+	// the pending count - the count can never contradict what "show" displays.
+	sResult.Printed = !paused
+	s.CurrentResults = append(s.CurrentResults, sResult)
+	s.resultMutex.Unlock()
+	// While the interactive console is open we still record the match above (so
+	// show, savejson and -o output stay complete) but do not stream it to the
+	// terminal - otherwise inflight requests completing after the user opens the
+	// console would scroll the banner off screen.
+	if !paused {
+		s.PrintResult(sResult)
+	}
+}
+
+// SetPaused toggles whether Result streams matches to the live terminal. While
+// paused (the interactive console is open) matches are recorded but not printed,
+// so inflight requests completing cannot scroll the console off screen. Leaving
+// a pause (paused == false) marks every held result as shown, since resume
+// reports their count to the user; a subsequent pause then only counts matches
+// that are genuinely new.
+func (s *Stdoutput) SetPaused(paused bool) {
+	s.resultMutex.Lock()
+	s.paused = paused
+	if !paused {
+		for i := range s.CurrentResults {
+			s.CurrentResults[i].Printed = true
+		}
+	}
+	s.resultMutex.Unlock()
+}
+
+// PendingResults returns the number of held matches not yet shown to the user:
+// results recorded while paused that still survive the active filters. It is
+// derived from CurrentResults, so a filter change that prunes a held result
+// drops it from this count in the same operation.
+func (s *Stdoutput) PendingResults() int {
+	s.resultMutex.Lock()
+	defer s.resultMutex.Unlock()
+	n := 0
+	for _, r := range s.CurrentResults {
+		if !r.Printed {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *Stdoutput) writeResultToFile(resp ffuf.Response) string {
+	var fileContent, fileName, filePath string
+	// Create directory if needed
+	if s.config.OutputDirectory != "" {
+		err := os.MkdirAll(s.config.OutputDirectory, 0750)
+		if err != nil {
+			if !os.IsExist(err) {
+				s.Error(err.Error())
+				return ""
+			}
+		}
+	}
+	fileContent = fmt.Sprintf("%s\n---- ↑ Request ---- Response ↓ ----\n\n%s", resp.Request.Raw, resp.Raw)
+
+	// Create file name
+	fileName = fmt.Sprintf("%x", md5.Sum([]byte(fileContent)))
+
+	filePath = path.Join(s.config.OutputDirectory, fileName)
+	err := os.WriteFile(filePath, []byte(fileContent), 0640)
+	if err != nil {
+		s.Error(err.Error())
+	}
+	return fileName
+}
+
+func (s *Stdoutput) PrintResult(res ffuf.Result) {
+	switch {
+	case s.config.Json:
+		s.resultJson(res)
+	case s.config.Quiet:
+		s.resultQuiet(res)
+	case len(s.fuzzkeywords) > 1 || s.config.Verbose || len(s.config.OutputDirectory) > 0 || len(res.ScraperData) > 0:
+		// Print a multi-line result (when using multiple input keywords and wordlists)
+		s.resultMultiline(res)
+	default:
+		s.resultNormal(res)
+	}
+}
+
+func (s *Stdoutput) prepareInputsOneLine(res ffuf.Result) string {
+	inputs := ""
+	if len(s.fuzzkeywords) > 1 {
+		for _, k := range s.fuzzkeywords {
+			if ffuf.StrInSlice(k, s.config.CommandKeywords) {
+				// If we're using external command for input, display the position instead of input
+				inputs = fmt.Sprintf("%s%s : %s ", inputs, k, strconv.Itoa(res.Position))
+			} else {
+				inputs = fmt.Sprintf("%s%s : %s ", inputs, k, res.Input[k])
+			}
+		}
+	} else {
+		for _, k := range s.fuzzkeywords {
+			if ffuf.StrInSlice(k, s.config.CommandKeywords) {
+				// If we're using external command for input, display the position instead of input
+				inputs = strconv.Itoa(res.Position)
+			} else {
+				inputs = string(res.Input[k])
+			}
+		}
+	}
+	return inputs
+}
+
+func (s *Stdoutput) resultQuiet(res ffuf.Result) {
+	fmt.Println(s.prepareInputsOneLine(res))
+}
+
+func (s *Stdoutput) resultMultiline(res ffuf.Result) {
+	var res_hdr, res_str string
+	res_str = "%s%s    * %s: %s\n"
+	res_hdr = fmt.Sprintf("%s%s[Status: %d, Size: %d, Words: %d, Lines: %d, Duration: %dms]%s", s.stdoutClear(), s.colorize(res.StatusCode), res.StatusCode, res.ContentLength, res.ContentWords, res.ContentLines, res.Duration.Milliseconds(), s.ansiClear())
+	reslines := ""
+	if s.config.Verbose {
+		reslines = fmt.Sprintf("%s%s| URL | %s\n", reslines, s.stdoutClear(), res.Url)
+		redirectLocation := res.RedirectLocation
+		if redirectLocation != "" {
+			reslines = fmt.Sprintf("%s%s| --> | %s\n", reslines, s.stdoutClear(), redirectLocation)
+		}
+	}
+	if res.ResultFile != "" {
+		reslines = fmt.Sprintf("%s%s| RES | %s\n", reslines, s.stdoutClear(), res.ResultFile)
+	}
+	for _, k := range s.fuzzkeywords {
+		if ffuf.StrInSlice(k, s.config.CommandKeywords) {
+			// If we're using external command for input, display the position instead of input
+			reslines = fmt.Sprintf(res_str, reslines, s.stdoutClear(), k, strconv.Itoa(res.Position))
+		} else {
+			// Wordlist input
+			reslines = fmt.Sprintf(res_str, reslines, s.stdoutClear(), k, res.Input[k])
+		}
+	}
+	if len(res.ScraperData) > 0 {
+		reslines = fmt.Sprintf("%s%s| SCR |\n", reslines, s.stdoutClear())
+		for k, vslice := range res.ScraperData {
+			for _, v := range vslice {
+				reslines = fmt.Sprintf(res_str, reslines, s.stdoutClear(), k, v)
+			}
+		}
+	}
+	fmt.Printf("%s\n%s\n", res_hdr, reslines)
+}
+
+func (s *Stdoutput) resultNormal(res ffuf.Result) {
+	resnormal := fmt.Sprintf("%s%s%-23s [Status: %d, Size: %d, Words: %d, Lines: %d, Duration: %dms]%s", s.stdoutClear(), s.colorize(res.StatusCode), s.prepareInputsOneLine(res), res.StatusCode, res.ContentLength, res.ContentWords, res.ContentLines, res.Duration.Milliseconds(), s.ansiClear())
+	fmt.Println(resnormal)
+}
+
+func (s *Stdoutput) resultJson(res ffuf.Result) {
+	resBytes, err := json.Marshal(res)
+	if err != nil {
+		s.Error(err.Error())
+	} else {
+		fmt.Fprint(os.Stderr, s.stderrClear())
+		fmt.Println(string(resBytes))
+	}
+}
+
+func (s *Stdoutput) colorize(status int64) string {
+	if !s.config.Colors {
+		return ""
+	}
+	colorCode := ANSI_CLEAR
+	if status >= 200 && status < 300 {
+		colorCode = ANSI_GREEN
+	}
+	if status >= 300 && status < 400 {
+		colorCode = ANSI_BLUE
+	}
+	if status >= 400 && status < 500 {
+		colorCode = ANSI_YELLOW
+	}
+	if status >= 500 && status < 600 {
+		colorCode = ANSI_RED
+	}
+	return colorCode
+}
+
+func printOption(name []byte, value []byte) {
+	fmt.Fprintf(os.Stderr, " :: %-16s : %s\n", name, value)
+}
