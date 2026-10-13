@@ -52,6 +52,48 @@ Protocol choice and response minimization are independent. A scan can use
 HTTP/3 with full `GET` responses, or a qualified smaller response over HTTP/2
 or HTTP/1.1.
 
+## Install a release
+
+Prebuilt archives and checksums are available from
+[GitHub Releases](https://github.com/assetnote/h3fuzz/releases). Release
+archives include the h3fuzz binary, `final.txt`, documentation, license files,
+and the local performance harness.
+
+Common archive names are:
+
+| Platform | Archive |
+| --- | --- |
+| Linux x86-64 | `h3fuzz_0.1.0_linux_amd64.tar.gz` |
+| Linux ARM64 | `h3fuzz_0.1.0_linux_arm64.tar.gz` |
+| macOS Apple silicon | `h3fuzz_0.1.0_macOS_arm64.tar.gz` |
+| macOS Intel | `h3fuzz_0.1.0_macOS_amd64.tar.gz` |
+| Windows x86-64 | `h3fuzz_0.1.0_windows_amd64.zip` |
+
+The GitHub CLI can download a specific archive and its checksum file. This
+example downloads the Linux x86-64 release. Authenticate first with
+`gh auth login` when the repository requires GitHub access:
+
+```sh
+version=0.1.0
+asset="h3fuzz_${version}_linux_amd64.tar.gz"
+gh release download "v${version}" \
+  --repo assetnote/h3fuzz \
+  --pattern "$asset" \
+  --pattern "h3fuzz_${version}_checksums.txt"
+grep "  ${asset}$" "h3fuzz_${version}_checksums.txt" | sha256sum -c -
+mkdir "h3fuzz-${version}"
+tar -xzf "$asset" -C "h3fuzz-${version}"
+cd "h3fuzz-${version}"
+./h3fuzz -V
+./h3fuzz -web
+```
+
+On macOS, use the appropriate `macOS` archive and replace `sha256sum` with
+`shasum -a 256`. On Windows, download the matching `.zip`, verify its SHA-256
+value against the checksum file, extract it, and run `h3fuzz.exe -web` from the
+extracted directory. Keeping the extracted files together makes the bundled
+`final.txt` available as the default wordlist.
+
 ## Build
 
 The module currently requires Go 1.26. The compiled web assets are checked in

@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Prepare the initial public h3fuzz release.
+## v0.1.0 - 2026-10-13
+
+- Prepare the initial h3fuzz release.
 - Add an authenticated HTTPS web console for persistent, concurrent scan
   sessions.
 - Add automatic HTTP/3, HTTP/2, and HTTP/1.1 protocol selection with explicit
