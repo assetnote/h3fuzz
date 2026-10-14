@@ -3,10 +3,7 @@
 ## Reporting a vulnerability
 
 Use the **Report a vulnerability** control on this repository's Security page
-when GitHub private vulnerability reporting is available. If that control is
-not available, use [Searchlight Cyber's published contact page](https://www.slcyber.io/contact)
-to request a private reporting channel. Do not include vulnerability details,
-credentials, or scan data in the contact form.
+when GitHub private vulnerability reporting is available.
 
 Do not open a public issue or pull request for a security vulnerability.
 
