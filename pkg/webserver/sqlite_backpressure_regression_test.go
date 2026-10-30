@@ -3,10 +3,112 @@ package webserver
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// TestSQLiteConcurrentResultAndProgressWriters verifies the actual WAL writer
+// mix used by concurrent web sessions. SQLite remains the serialization point,
+// while busy_timeout absorbs short ownership changes without surfacing
+// SQLITE_BUSY or starving indexed reads.
+func TestSQLiteConcurrentResultAndProgressWriters(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("modernc SQLite timing and busy-timeout behavior are not meaningful under the race detector")
+	}
+	store, err := OpenStore(t.TempDir() + "/concurrent-writers.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sessions := []Session{testSession("writer-a"), testSession("writer-b")}
+	for index := range sessions {
+		if err := store.CreateSession(t.Context(), &sessions[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	errors := make(chan error, 3)
+	var writers sync.WaitGroup
+	for sessionIndex := range sessions {
+		session := sessions[sessionIndex]
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			<-start
+			now := time.Now().UTC()
+			for batchIndex := 0; batchIndex < 40; batchIndex++ {
+				batch := make([]StoredResult, 250)
+				for resultIndex := range batch {
+					position := batchIndex*len(batch) + resultIndex
+					batch[resultIndex] = StoredResult{
+						Input:    map[string][]byte{"FUZZ": []byte(fmt.Sprintf("item-%d", position))},
+						Position: position, StatusCode: 200, ContentType: "text/html",
+						URL:  fmt.Sprintf("https://example.test/%s/item-%d", session.ID, position),
+						Host: "example.test", CreatedAt: now,
+					}
+				}
+				if _, _, err := store.InsertResultBatch(ctx, session.ID, batch, nil); err != nil {
+					errors <- fmt.Errorf("insert %s: %w", session.ID, err)
+					return
+				}
+			}
+		}()
+	}
+	writers.Add(1)
+	go func() {
+		defer writers.Done()
+		<-start
+		for sequence := int64(1); sequence <= 100; sequence++ {
+			if err := store.UpdateProgress(ctx, sessions[sequence%2].ID, map[string]any{"processed": sequence}, sequence); err != nil {
+				errors <- fmt.Errorf("progress update: %w", err)
+				return
+			}
+		}
+	}()
+	close(start)
+
+	queryDone := make(chan struct{})
+	go func() {
+		writers.Wait()
+		close(queryDone)
+	}()
+	for {
+		select {
+		case <-queryDone:
+			goto finished
+		case err := <-errors:
+			t.Fatal(err)
+		case <-time.After(10 * time.Millisecond):
+			queryCtx, queryCancel := context.WithTimeout(ctx, 10*time.Second)
+			_, err := store.ExploreResults(queryCtx, sessions[0].ID, ResultExplorerQuery{Limit: 25})
+			queryCancel()
+			if err != nil {
+				t.Fatalf("explore results during concurrent writes: %v", err)
+			}
+		}
+	}
+
+finished:
+	select {
+	case err := <-errors:
+		t.Fatal(err)
+	default:
+	}
+	for _, session := range sessions {
+		var count int64
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM results WHERE session_id=?`, session.ID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 10_000 {
+			t.Fatalf("session %s stored %d results, want 10000", session.ID, count)
+		}
+	}
+}
 
 // TestSQLiteWriterSustainsMatchedResultsAfterRepeatedSessions covers the real
 // web persistence seam: every matched response is queued once as authoritative
@@ -183,12 +285,11 @@ func BenchmarkStoreInsertResultBatchIndexProfiles(b *testing.B) {
 		drop []string
 	}{
 		{name: "all_indexes"},
-		{name: "without_explorer", drop: []string{"results_explorer_metrics"}},
 		{name: "without_tree", drop: []string{"results_tree_scope"}},
 		{name: "without_url", drop: []string{"results_session_url_cursor"}},
 		{name: "without_status", drop: []string{"results_session_status_cursor"}},
 		{name: "without_cursor", drop: []string{"results_session_cursor"}},
-		{name: "cursor_only", drop: []string{"results_explorer_metrics", "results_tree_scope", "results_session_url_cursor", "results_session_status_cursor"}},
+		{name: "cursor_only", drop: []string{"results_tree_scope", "results_session_url_cursor", "results_session_status_cursor"}},
 	}
 	for _, profile := range profiles {
 		b.Run(profile.name, func(b *testing.B) {
@@ -219,6 +320,54 @@ func BenchmarkStoreInsertResultBatchIndexProfiles(b *testing.B) {
 			for iteration := 0; iteration < b.N; iteration++ {
 				batch := append([]StoredResult(nil), results...)
 				if _, _, err := store.InsertResultBatch(context.Background(), session.ID, batch, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkExploreResultsWithLargeHistory(b *testing.B) {
+	store, err := OpenStore(b.TempDir() + "/large-history-query.db")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+	session := testSession("large-history-query")
+	if err := store.CreateSession(context.Background(), &session); err != nil {
+		b.Fatal(err)
+	}
+	const total = 120_000
+	batch := make([]StoredResult, resultBatchSize)
+	now := time.Now().UTC()
+	for offset := 0; offset < total; offset += len(batch) {
+		for index := range batch {
+			position := offset + index
+			batch[index] = StoredResult{
+				Input:    map[string][]byte{"FUZZ": []byte(fmt.Sprintf("item-%06d", position))},
+				Position: position, StatusCode: int64(200 + position%5),
+				ContentLength: int64(1000 + position%250), ContentWords: int64(50 + position%20),
+				ContentLines: int64(10 + position%5), ContentType: []string{"text/html", "application/json"}[position%2],
+				URL: fmt.Sprintf("https://example.test/assets/item-%06d", position), Host: "example.test", CreatedAt: now,
+			}
+		}
+		if _, _, err := store.InsertResultBatch(context.Background(), session.ID, batch, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+	benchmarks := []struct {
+		name  string
+		query ResultExplorerQuery
+	}{
+		{name: "default_summary", query: ResultExplorerQuery{Limit: 100}},
+		{name: "url_descending", query: ResultExplorerQuery{Limit: 100, Sort: "url", Descending: true}},
+		{name: "status_filter", query: ResultExplorerQuery{Limit: 100, Statuses: []int64{200}}},
+		{name: "content_type_filter", query: ResultExplorerQuery{Limit: 100, ContentTypes: []string{"text/html"}}},
+	}
+	for _, benchmark := range benchmarks {
+		b.Run(benchmark.name, func(b *testing.B) {
+			for iteration := 0; iteration < b.N; iteration++ {
+				if _, err := store.ExploreResults(context.Background(), session.ID, benchmark.query); err != nil {
 					b.Fatal(err)
 				}
 			}

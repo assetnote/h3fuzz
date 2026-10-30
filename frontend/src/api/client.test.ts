@@ -79,6 +79,9 @@ describe('SQLite storage management', () => {
       warning_threshold_bytes: 1_073_741_824,
       warning: false,
       response_bodies_stored: false,
+      compaction_available: true,
+      compaction_blocked_reason: '',
+      active_scan_count: 0,
     };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => stats })

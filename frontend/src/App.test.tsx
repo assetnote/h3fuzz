@@ -59,23 +59,26 @@ vi.mock('./hooks/useSessionStream', () => ({
 }));
 
 vi.mock('./components/SessionRail', () => ({
-  SessionRail: ({ sessions, onNew, onSelect }: { sessions: Session[]; onNew: () => void; onSelect: (id: string) => void }) => (
+  SessionRail: ({ sessions, onNew, onSelect, requestedSelection }: { sessions: Session[]; onNew: () => void; onSelect: (id: string) => void; requestedSelection?: { ids: string[]; requestID: number } }) => (
     <div>
       <button onClick={onNew}>Open wizard</button>
+      <span data-testid="requested-cleanup-selection">{requestedSelection?.ids.join(',') ?? ''}</span>
       {sessions.map((entry) => <button key={entry.id} onClick={() => onSelect(entry.id)}>Select {entry.id}</button>)}
     </div>
   ),
 }));
 
 vi.mock('./components/NewSessionWizard', () => ({
-  NewSessionWizard: ({ opened, initialSession, onCreate }: { opened: boolean; initialSession?: Session; onCreate: (request: CreateSessionRequest) => void }) =>
+  NewSessionWizard: ({ opened, initialSession, initialTarget, onCreate, onClose }: { opened: boolean; initialSession?: Session; initialTarget?: string; onCreate: (request: CreateSessionRequest) => void; onClose: () => void }) =>
     opened ? (
       <div>
         {initialSession ? <span>Editing clone of {initialSession.id}</span> : null}
+        {initialTarget ? <span data-testid="initial-clone-target">{initialTarget}</span> : null}
+        <button onClick={onClose}>Close test wizard</button>
         <button
           onClick={() =>
             onCreate({
-              target: 'https://target.example/FUZZ',
+              target: initialTarget ?? 'https://target.example/FUZZ',
               profile: 'dir',
               wordlist: 'final.txt',
               auto_start: true,
@@ -100,6 +103,7 @@ vi.mock('./components/SessionDashboard', () => ({
     onRunPreflight,
     onAddFilters,
     onCloneEdit,
+    onCloneResult,
   }: {
     session: Session;
     results: Result[];
@@ -111,6 +115,7 @@ vi.mock('./components/SessionDashboard', () => ({
     onRunPreflight?: () => void;
     onAddFilters: (filters: SessionFilterPatch) => Promise<void>;
     onCloneEdit?: () => void;
+    onCloneResult?: (url: string) => void;
   }) => (
     <div>
       <div data-testid="session-status">{session.status}</div>
@@ -125,6 +130,11 @@ vi.mock('./components/SessionDashboard', () => ({
       {onRunPreflight ? <button onClick={onRunPreflight}>Run test preflight</button> : null}
       <button onClick={() => void onAddFilters({ words: '656' })}>Add word filter</button>
       {onCloneEdit ? <button onClick={onCloneEdit}>Clone and edit test session</button> : null}
+      {onCloneResult ? (
+        <button onClick={() => onCloneResult('https://target.example/admin?from=result#details')}>
+          Clone discovered path
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -211,6 +221,9 @@ describe('App session cache ordering', () => {
       warning_threshold_bytes: 1_073_741_824,
       warning: false,
       response_bodies_stored: false,
+      compaction_available: true,
+      compaction_blocked_reason: '',
+      active_scan_count: 0,
     });
     harness.api.compactStorage.mockResolvedValue({
       database_bytes: 0,
@@ -220,6 +233,9 @@ describe('App session cache ordering', () => {
       warning_threshold_bytes: 1_073_741_824,
       warning: false,
       response_bodies_stored: false,
+      compaction_available: true,
+      compaction_blocked_reason: '',
+      active_scan_count: 0,
     });
     harness.api.latestResults.mockResolvedValue({ results: [], next_cursor: 0, has_more: false });
     harness.api.terminal.mockResolvedValue({ entries: [], next_cursor: 0, has_more: false });
@@ -252,6 +268,75 @@ describe('App session cache ordering', () => {
 
     await waitFor(() => expect(screen.getByTestId('visible-terminal-count')).toHaveTextContent('0'));
     expect(harness.api.terminal).not.toHaveBeenCalled();
+  });
+
+  it('uses authoritative storage eligibility and refreshes it after lifecycle changes', async () => {
+    const running = session('running', 1);
+    harness.api.sessions.mockResolvedValue([running]);
+    harness.api.storage.mockResolvedValue({
+      database_bytes: 1_400_000_000,
+      wal_bytes: 100_000_000,
+      total_bytes: 1_500_000_000,
+      reclaimable_bytes: 300_000_000,
+      warning_threshold_bytes: 1_073_741_824,
+      warning: true,
+      response_bodies_stored: false,
+      compaction_available: true,
+      compaction_blocked_reason: '',
+      active_scan_count: 0,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    // The cached session can lag the manager. It must not override the
+    // server's compaction decision and permanently disable this action.
+    expect(await screen.findByRole('button', { name: 'Compact database' })).toBeEnabled();
+    expect(harness.api.storage).toHaveBeenCalledOnce();
+
+    act(() => {
+      harness.onStreamEvent?.({
+        type: 'session.updated',
+        session_id: running.id,
+        sequence: 2,
+        data: session('completed', 2),
+        at: '2026-10-04T00:00:02Z',
+      });
+    });
+    await waitFor(() => expect(harness.api.storage).toHaveBeenCalledTimes(2));
+  });
+
+  it('passes the storage cleanup shortlist into the session rail selection', async () => {
+    const user = userEvent.setup();
+    const completed = session('completed', 1);
+    harness.api.sessions.mockResolvedValue([completed]);
+    harness.api.storage.mockResolvedValue({
+      database_bytes: 1_400_000_000,
+      wal_bytes: 100_000_000,
+      total_bytes: 1_500_000_000,
+      reclaimable_bytes: 300_000_000,
+      warning_threshold_bytes: 1_073_741_824,
+      warning: true,
+      response_bodies_stored: false,
+      compaction_available: true,
+      compaction_blocked_reason: '',
+      active_scan_count: 0,
+      sessions: [{ session_id: completed.id, name: completed.name, status: completed.status, result_count: 50_000, estimated_bytes: 500_000_000 }],
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Select largest scans' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('requested-cleanup-selection').every((node) => node.textContent === completed.id)).toBe(true);
+    });
   });
 
   it('does not let a stale create response overwrite a newer running WebSocket event', async () => {
@@ -314,6 +399,75 @@ describe('App session cache ordering', () => {
       target: 'https://target.example/FUZZ',
       auto_start: true,
     })));
+  });
+
+  it('opens a result path as a recursive cloned scan target', async () => {
+    const completed = session('completed', 1);
+    const cloned = { ...completed, id: 'session-2', status: 'starting' as const, cloned_from_id: completed.id };
+    harness.api.sessions.mockResolvedValue([completed]);
+    harness.api.cloneSession.mockResolvedValue(cloned);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Clone discovered path' }));
+    expect(screen.getByText('Editing clone of session-1')).toBeVisible();
+    expect(screen.getByTestId('initial-clone-target')).toHaveTextContent('https://target.example/admin/FUZZ');
+    await user.click(screen.getByRole('button', { name: 'Create test session' }));
+    await waitFor(() => expect(harness.api.cloneSession).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      target: 'https://target.example/admin/FUZZ',
+      auto_start: true,
+    })));
+  });
+
+  it('does not reuse a result clone target after the clone is created', async () => {
+    const completed = session('completed', 1);
+    const cloned = { ...completed, id: 'session-2', status: 'starting' as const, cloned_from_id: completed.id };
+    harness.api.sessions.mockResolvedValue([completed]);
+    harness.api.cloneSession.mockResolvedValue(cloned);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Clone discovered path' }));
+    expect(screen.getByTestId('initial-clone-target')).toHaveTextContent('https://target.example/admin/FUZZ');
+    await user.click(screen.getByRole('button', { name: 'Create test session' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Create test session' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Open wizard' }));
+    expect(screen.queryByTestId('initial-clone-target')).not.toBeInTheDocument();
+    expect(screen.queryByText('Editing clone of session-1')).not.toBeInTheDocument();
+  });
+
+  it('does not reuse a result clone target after the clone dialog is closed', async () => {
+    const completed = session('completed', 1);
+    harness.api.sessions.mockResolvedValue([completed]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Clone discovered path' }));
+    expect(screen.getByTestId('initial-clone-target')).toHaveTextContent('https://target.example/admin/FUZZ');
+    await user.click(screen.getByRole('button', { name: 'Close test wizard' }));
+    await user.click(screen.getByRole('button', { name: 'Open wizard' }));
+
+    expect(screen.queryByTestId('initial-clone-target')).not.toBeInTheDocument();
+    expect(screen.queryByText('Editing clone of session-1')).not.toBeInTheDocument();
   });
 
   it('does not let a stale action response overwrite a newer running WebSocket event', async () => {

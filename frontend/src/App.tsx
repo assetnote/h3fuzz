@@ -42,6 +42,7 @@ import {
   reconcileSessionList,
   upsertSession,
 } from './utils/sessionState';
+import { resultScanTarget } from './utils/resultView';
 import { mergeResults, RESULT_CACHE_LIMIT } from './utils/resultCache';
 import { appendRatePoint, type RatePoint } from './utils/rateHistory';
 
@@ -88,6 +89,8 @@ export default function App() {
   const [wizardOpen, wizard] = useDisclosure(false);
   const [compareOpen, compare] = useDisclosure(false);
   const [cloneSource, setCloneSource] = useState<Session>();
+  const [cloneTarget, setCloneTarget] = useState<string>();
+  const [cleanupSelection, setCleanupSelection] = useState<{ ids: string[]; requestID: number }>();
   const [mobileOpen, mobile] = useDisclosure(false);
   const [resultsBySession, setResultsBySession] = useState<Record<string, Result[]>>({});
   const [terminalBySession, setTerminalBySession] = useState<Record<string, TerminalEntry[]>>({});
@@ -97,6 +100,18 @@ export default function App() {
   const loadedResultSessions = useRef(new Set<string>());
   const pendingFilterUpdates = useRef(new Set<string>());
   const streamRevision = useRef(0);
+  const clearCloneDraft = useCallback(() => {
+    setCloneSource(undefined);
+    setCloneTarget(undefined);
+  }, []);
+  const openNewSession = useCallback(() => {
+    clearCloneDraft();
+    wizard.open();
+  }, [clearCloneDraft, wizard]);
+  const closeSessionWizard = useCallback(() => {
+    clearCloneDraft();
+    wizard.close();
+  }, [clearCloneDraft, wizard]);
   const pendingSessionActions = useMutationState({
     filters: { mutationKey: ['session-action'], status: 'pending' },
     select: (mutation) => mutation.state.variables as SessionActionVariables | undefined,
@@ -300,6 +315,10 @@ export default function App() {
           ?.find((entry) => entry.id === event.session_id);
         const filtersChanged = previous && filterSignature(previous) !== filterSignature(session);
         updateSession(event.session_id, session, event.sequence);
+        // Compaction eligibility is owned by the server. Refresh it on every
+        // lifecycle update instead of trying to infer it from a possibly stale
+        // browser session cache.
+        void queryClient.invalidateQueries({ queryKey: ['storage'] });
         if (filtersChanged && !pendingFilterUpdates.current.has(event.session_id)) {
           void replaceSessionResults(event.session_id);
         }
@@ -359,8 +378,8 @@ export default function App() {
       );
       setSelectedID(session.id);
       setPage('sessions');
-      wizard.close();
-      setCloneSource(undefined);
+      closeSessionWizard();
+      void queryClient.invalidateQueries({ queryKey: ['storage'] });
       notifications.show({ color: 'green', title: session.cloned_from_id ? 'Cloned session created' : 'Session created', message: session.target });
     },
     onError: (error) => notifications.show({ color: 'red', title: 'Could not create session', message: errorMessage(error) }),
@@ -378,6 +397,7 @@ export default function App() {
     },
     onSuccess: (session, variables) => {
       updateSession(session.id, session);
+      void queryClient.invalidateQueries({ queryKey: ['storage'] });
       if (variables.action === 'preflight') {
         notifications.show({ color: 'green', title: 'Protocol preflight started', message: 'Capability evidence will update live.' });
       }
@@ -395,6 +415,7 @@ export default function App() {
         );
       }
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      void queryClient.invalidateQueries({ queryKey: ['storage'] });
       notifications.show({
         color: 'red',
         title: variables.action === 'preflight' ? 'Could not run protocol preflight' : 'Session action failed',
@@ -491,7 +512,7 @@ export default function App() {
     mutationFn: ({ ids, action }: { ids: string[]; action: 'stop' | 'delete' | 'archive' }) => api.bulkSessions(ids, action),
     onSuccess: (result, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      if (variables.action === 'delete') void queryClient.invalidateQueries({ queryKey: ['storage'] });
+      void queryClient.invalidateQueries({ queryKey: ['storage'] });
       notifications.show({ color: result.failed && Object.keys(result.failed).length ? 'yellow' : 'green', title: `${variables.action} completed`, message: `${result.succeeded?.length ?? 0} session(s) updated.` });
     },
     onError: (error) => notifications.show({ color: 'red', title: 'Bulk action failed', message: errorMessage(error) }),
@@ -536,6 +557,7 @@ export default function App() {
       connected={connection === 'connected'}
       organizationPendingIDs={pendingOrganizationIDs}
       bulkPending={bulkMutation.isPending}
+      requestedSelection={cleanupSelection}
       onOrganization={(id, patch) => organizationMutation.mutate({ id, patch })}
       onBulk={(ids, action) => bulkMutation.mutate({ ids, action })}
       onSelect={(id) => {
@@ -544,8 +566,7 @@ export default function App() {
         mobile.close();
       }}
       onNew={() => {
-        setCloneSource(undefined);
-        wizard.open();
+        openNewSession();
         mobile.close();
       }}
       onSettings={() => {
@@ -591,7 +612,7 @@ export default function App() {
           description="Configure a target, select a language profile, and let h3fuzz choose the fastest compatible transport."
           action="New session"
           icon="new"
-          onAction={wizard.open}
+          onAction={openNewSession}
         />
       );
     }
@@ -622,6 +643,17 @@ export default function App() {
         }}
         onCloneEdit={() => {
           setCloneSource(selected);
+          setCloneTarget(undefined);
+          wizard.open();
+        }}
+        onCloneResult={(url) => {
+          const target = resultScanTarget(url);
+          if (!target) {
+            notifications.show({ color: 'red', title: 'Cannot clone this result', message: 'The result is not an HTTP or HTTPS URL.' });
+            return;
+          }
+          setCloneSource(selected);
+          setCloneTarget(target);
           wizard.open();
         }}
         onCompare={['completed', 'stopped'].includes(selected.status) && sessions.some(
@@ -641,6 +673,7 @@ export default function App() {
     fetchResultDelta,
     filtersMutation,
     loadingResults,
+    openNewSession,
     optionsQuery.data?.flags,
     organizationMutation,
     page,
@@ -676,7 +709,7 @@ export default function App() {
               <IconBrandSpeedtest size={19} />
               <Text fw={700}>h3fuzz</Text>
             </Group>
-            <ActionIcon variant="light" onClick={wizard.open} aria-label="New session">
+            <ActionIcon variant="light" onClick={openNewSession} aria-label="New session">
               <IconPlus size={17} />
             </ActionIcon>
           </Group>
@@ -684,12 +717,16 @@ export default function App() {
         <StorageWarning
           stats={storageQuery.data}
           compacting={compactStorageMutation.isPending}
-          compactDisabled={sessions.some((session) => ['starting', 'running', 'paused', 'stopping'].includes(session.status))}
-          onReviewSessions={() => {
+          onReviewSessions={(sessionIDs = []) => {
             setPage('sessions');
+            if (sessionIDs.length) {
+              setCleanupSelection((current) => ({ ids: sessionIDs, requestID: (current?.requestID ?? 0) + 1 }));
+            }
             notifications.show({
               title: 'Choose scans to remove',
-              message: 'Use the session menu or bulk selection in the left panel, then compact the database.',
+              message: sessionIDs.length
+                ? `${sessionIDs.length} large saved ${sessionIDs.length === 1 ? 'scan is' : 'scans are'} selected in the left panel.`
+                : 'Use the session menu or bulk selection in the left panel, then compact the database.',
             });
           }}
           onCompact={() => compactStorageMutation.mutateAsync()}
@@ -713,6 +750,7 @@ export default function App() {
           mobile
           organizationPendingIDs={pendingOrganizationIDs}
           bulkPending={bulkMutation.isPending}
+          requestedSelection={cleanupSelection}
           onOrganization={(id, patch) => organizationMutation.mutate({ id, patch })}
           onBulk={(ids, action) => bulkMutation.mutate({ ids, action })}
           onSelect={(id) => {
@@ -721,8 +759,7 @@ export default function App() {
             mobile.close();
           }}
           onNew={() => {
-            setCloneSource(undefined);
-            wizard.open();
+            openNewSession();
             mobile.close();
           }}
           onSettings={() => {
@@ -738,13 +775,11 @@ export default function App() {
           profiles={profilesQuery.data}
           options={optionsQuery.data?.flags}
           initialSession={cloneSource}
+          initialTarget={cloneTarget}
           presets={presetsQuery.data}
           presetSaving={presetMutation.isPending}
           submitting={createMutation.isPending}
-          onClose={() => {
-            setCloneSource(undefined);
-            wizard.close();
-          }}
+          onClose={closeSessionWizard}
           onCreate={(request: CreateSessionRequest) => createMutation.mutate({ request, sourceID: cloneSource?.id })}
           onSavePreset={(preset) => presetMutation.mutate({ type: 'create', preset })}
           onDeletePreset={(id) => presetMutation.mutate({ type: 'delete', id })}

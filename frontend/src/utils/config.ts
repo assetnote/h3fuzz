@@ -194,6 +194,12 @@ export const bundledProfiles: Profile[] = [
     description: 'Directory-oriented discovery with HTML variants.',
     extensions: ['html'],
   },
+  {
+    id: 'custom',
+    name: 'Custom',
+    description: 'Use an operator-defined comma-separated extension set.',
+    extensions: [],
+  },
 ];
 
 export function cloneConfig(config: ConfigOptions): ConfigOptions {
@@ -214,7 +220,7 @@ export function mergeConfig(base: ConfigOptions, patch?: Partial<ConfigOptions>)
 
 export function applyProfile(config: ConfigOptions, profile: Profile): ConfigOptions {
   const next = mergeConfig(config, profile.options);
-  next.input.extensions = profile.extensions.join(',');
+  if (profile.id !== 'custom') next.input.extensions = profile.extensions.join(',');
   next.input.dirsearch_compat = true;
   return next;
 }

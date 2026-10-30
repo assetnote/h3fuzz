@@ -3,7 +3,7 @@ package webserver
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"sync"
@@ -1014,8 +1014,11 @@ func newID() (string, error) {
 	}
 	raw[6] = raw[6]&0x0f | 0x40
 	raw[8] = raw[8]&0x3f | 0x80
-	return fmt.Sprintf("%s-%s-%s-%s-%s", hex.EncodeToString(raw[0:4]), hex.EncodeToString(raw[4:6]),
-		hex.EncodeToString(raw[6:8]), hex.EncodeToString(raw[8:10]), hex.EncodeToString(raw[10:16])), nil
+	// These identifiers include the conventional UUID version and variant bits,
+	// leaving 122 random bits. URL-safe base64 preserves the full 16-byte value
+	// in 22 characters instead of the conventional 36-character hex form; this
+	// matters most for session IDs repeated throughout result indexes.
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 func isNotFound(err error) bool { return errors.Is(err, ErrNotFound) }

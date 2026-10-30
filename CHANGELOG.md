@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.2.0 - 2026-10-30
+
+- Reduce web-console database growth with compact result payloads, aggregate
+  explorer summaries, shorter session identifiers, and fewer duplicated index
+  entries.
+- Keep result indexes online across scans to avoid database-wide index rebuilds
+  and large-history stalls at scan completion.
+- Add per-session storage estimates, bulk selection of the largest scans, safe
+  compaction eligibility, bounded deletion reclamation, and legacy database
+  maintenance.
+- Add session select-all, result-to-scan cloning, and a custom extension
+  profile in the web console.
+
 ## v0.1.0 - 2026-10-13
 
 - Prepare the initial h3fuzz release.

@@ -323,6 +323,22 @@ export interface StorageStats {
   warning_threshold_bytes: number;
   warning: boolean;
   response_bodies_stored: boolean;
+  compaction_available: boolean;
+  compaction_blocked_reason: '' | 'active_scans' | string;
+  active_scan_count: number;
+  available_disk_bytes?: number;
+  compaction_required_bytes?: number;
+  maintenance_required?: boolean;
+  maintenance_reason?: '' | 'legacy_tree_metadata' | 'legacy_result_summaries' | string;
+  sessions?: StorageSessionUsage[] | null;
+}
+
+export interface StorageSessionUsage {
+  session_id: string;
+  name: string;
+  status: SessionStatus;
+  result_count: number;
+  estimated_bytes: number;
 }
 
 export interface Preset {

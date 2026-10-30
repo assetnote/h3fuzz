@@ -2,7 +2,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '../../test/render';
-import { MultiSelect, Select, TagsInput } from './fields';
+import { Checkbox, MultiSelect, Select, TagsInput } from './fields';
 
 describe('Radix field compatibility', () => {
   it('forwards compact sizing to a select trigger', () => {
@@ -50,5 +50,24 @@ describe('Radix field compatibility', () => {
     expect(label).toHaveClass('uiTagLabel');
     expect(label).toHaveAttribute('title', longValue);
     expect(container.querySelectorAll('.uiTag')).toHaveLength(1);
+  });
+
+  it('preserves an indeterminate checkbox and its explicit accessible name', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Checkbox
+        aria-label="Select all matching sessions"
+        label="Select all"
+        checked="indeterminate"
+        onChange={onChange}
+      />,
+    );
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Select all matching sessions' });
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    await user.click(checkbox);
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0].currentTarget.checked).toBe(true);
   });
 });

@@ -44,6 +44,9 @@ beforeAll(() => {
     '.railSessions .rt-ScrollAreaViewport > *',
     '.railSessionList',
     '.railViewControls',
+    '.railSelectionControls',
+    '.railSelectAll',
+    '.railSelectionCount',
     '.sessionTabActions',
     '.sessionTabWrapper:hover .sessionTabActions,\n.sessionTabWrapper:focus-within .sessionTabActions,\n.sessionTabChecked .sessionTabActions',
     '.sessionTabWrapper.sessionTabActionsSuppressed .sessionTabActions',
@@ -226,6 +229,103 @@ describe('SessionRail responsive sizing', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Select Archive target' }));
     await user.click(screen.getByLabelText('Archive selected sessions'));
     expect(onBulk).toHaveBeenCalledWith(['completed'], 'archive');
+  });
+
+  it('selects all matching sessions and exposes an indeterminate aggregate state', async () => {
+    const user = userEvent.setup();
+    const completed = {
+      ...session,
+      id: 'completed',
+      name: 'Completed target',
+      target: 'https://completed.example/FUZZ',
+      status: 'completed' as const,
+    };
+    const archived = {
+      ...completed,
+      id: 'archived',
+      name: 'Archived target',
+      target: 'https://archived.example/FUZZ',
+      archived: true,
+    };
+    const onBulk = vi.fn();
+    render(
+      <SessionRail
+        sessions={[session, completed, archived]}
+        activeID={session.id}
+        page="sessions"
+        connected
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onSettings={vi.fn()}
+        onBulk={onBulk}
+      />,
+    );
+
+    const selectAll = screen.getByRole('checkbox', { name: 'Select all matching sessions' });
+    expect(selectAll).not.toBeChecked();
+    expect(screen.getByText('2 shown')).toBeVisible();
+
+    await user.click(screen.getByRole('checkbox', { name: `Select ${session.name}` }));
+    expect(selectAll).toHaveAttribute('aria-checked', 'mixed');
+    expect(screen.getByText('1 selected')).toBeVisible();
+
+    selectAll.focus();
+    await user.keyboard('[Space]');
+    expect(selectAll).toBeChecked();
+    expect(screen.getByText('2 selected')).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Select Completed target' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Select Archived target' })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByText('Done')[0]);
+    expect(screen.getByText('1 shown')).toBeVisible();
+    expect(selectAll).toBeChecked();
+    await user.click(selectAll);
+    expect(screen.getByRole('checkbox', { name: 'Select Completed target' })).not.toBeChecked();
+    expect(screen.getByText('1 selected')).toBeVisible();
+
+    await user.click(screen.getByLabelText('Delete selected sessions'));
+    await user.click(screen.getByRole('button', { name: 'Delete sessions' }));
+    expect(onBulk).toHaveBeenCalledWith([session.id], 'delete');
+  });
+
+  it('applies an external cleanup selection and reveals matching archived scans', () => {
+    const archived = {
+      ...session,
+      id: 'archived',
+      name: 'Archived cleanup target',
+      status: 'completed' as const,
+      archived: true,
+    };
+    render(
+      <SessionRail
+        sessions={[session, archived]}
+        activeID={session.id}
+        page="sessions"
+        connected
+        requestedSelection={{ ids: [session.id, archived.id], requestID: 1 }}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: `Select ${session.name}` })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Archived cleanup target' })).toBeChecked();
+    expect(screen.getByText('2 selected')).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Archived' })).toBeChecked();
+  });
+
+  it('keeps aggregate selection controls contained at the narrow rail width', () => {
+    const { container } = renderRail(220);
+    const controls = container.querySelector<HTMLElement>('.railSelectionControls');
+    const selectAll = screen.getByRole('checkbox', { name: 'Select all matching sessions' });
+    const count = screen.getByText('1 shown');
+
+    expect(controls).toContainElement(selectAll);
+    expect(controls).toContainElement(count);
+    expect(getComputedStyle(controls!).minWidth).toBe('0');
+    expect(getComputedStyle(selectAll.closest<HTMLElement>('.railSelectAll')!).minWidth).toBe('0');
+    expect(getComputedStyle(count).whiteSpace).toBe('nowrap');
   });
 
   it('hides archived sessions until requested and removes the obsolete compact rail state', async () => {

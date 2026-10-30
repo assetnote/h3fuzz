@@ -38,6 +38,7 @@ import {
   IconBraces,
   IconCopy,
   IconFilter,
+  IconPlus,
   IconRefresh,
   IconRoute,
   IconSearch,
@@ -52,6 +53,7 @@ interface ResultsTableProps {
   loading?: boolean;
   totalResults?: number;
   windowTruncated?: boolean;
+  onCloneURL?: (url: string) => void;
 }
 
 type ResultSort = 'created' | 'status' | 'url' | 'size' | 'words' | 'lines' | 'content_type' | 'duration';
@@ -153,7 +155,15 @@ function DetailValue({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function ResultDetailDrawer({ result, onClose }: { result?: Result; onClose: () => void }) {
+function ResultDetailDrawer({
+  result,
+  onClose,
+  onCloneURL,
+}: {
+  result?: Result;
+  onClose: () => void;
+  onCloneURL?: (url: string) => void;
+}) {
   if (!result) return <Drawer opened={false} onClose={onClose} />;
   const location = resultLocation(result);
   const title = resultTitle(result);
@@ -202,6 +212,11 @@ function ResultDetailDrawer({ result, onClose }: { result?: Result; onClose: () 
             <Button size="xs" variant="soft" leftSection={<IconRoute size={14} />} onClick={() => copy(location.uri, 'Path copied')}>Copy path</Button>
             <Button size="xs" variant="soft" leftSection={<IconCopy size={14} />} onClick={() => copy(result.url, 'URL copied')}>Copy URL</Button>
             <Button size="xs" variant="soft" leftSection={<IconBraces size={14} />} onClick={() => copy(resultCurl(result.url), 'cURL command copied')}>Copy cURL</Button>
+            {onCloneURL ? (
+              <Button size="xs" variant="soft" leftSection={<IconPlus size={14} />} onClick={() => onCloneURL(result.url)}>
+                Clone scan from this result
+              </Button>
+            ) : null}
             {location.openURL ? (
               <Button component="a" href={location.openURL} target="_blank" rel="noopener noreferrer" size="xs" variant="soft">Open target</Button>
             ) : null}
@@ -223,6 +238,7 @@ export function ResultsTable({
   results,
   loading = false,
   totalResults = results.length,
+  onCloneURL,
 }: ResultsTableProps) {
   const [view, setView] = useState<'list' | 'tree'>('list');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -590,6 +606,7 @@ export function ResultsTable({
           query={query}
           revision={reload}
           loading={loading || pageLoading}
+          onCloneURL={onCloneURL}
         />
       ) : (
         <Paper withBorder className="resultsTable">
@@ -650,7 +667,13 @@ export function ResultsTable({
                       <Text role="cell" ff="monospace" fz="xs">{formatBytes(result.length)}</Text>
                       <Text role="cell" ff="monospace" fz="xs">{result.words.toLocaleString()}</Text>
                       <Box role="cell" className="resultActionCell">
-                        <ResultActions uri={location.uri} url={result.url} openURL={location.openURL} label={result.url} />
+                        <ResultActions
+                          uri={location.uri}
+                          url={result.url}
+                          openURL={location.openURL}
+                          label={result.url}
+                          onCloneURL={onCloneURL}
+                        />
                       </Box>
                     </Box>
                   );
@@ -690,7 +713,7 @@ export function ResultsTable({
         </Group>
       ) : null}
 
-      <ResultDetailDrawer result={detail} onClose={() => setDetail(undefined)} />
+      <ResultDetailDrawer result={detail} onClose={() => setDetail(undefined)} onCloneURL={onCloneURL} />
 
       <Modal opened={saveOpened} onClose={() => setSaveOpened(false)} title="Save filter view" size="sm" centered>
         <Stack gap="md">

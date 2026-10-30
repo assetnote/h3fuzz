@@ -317,6 +317,57 @@ func TestWebSocketHandshakeEnforcesAuthenticationAndOrigin(t *testing.T) {
 	}
 }
 
+func TestWebSocketRegistersBeforeLoadingInitialSnapshot(t *testing.T) {
+	application, server := newSecurityTestServer(t, false)
+	application.store.db.SetMaxOpenConns(1)
+
+	// Occupy the only database connection so ListSessions cannot finish. The
+	// WebSocket handshake and hub registration must still complete first.
+	tx, err := application.store.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	connection, _, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
+		HTTPHeader: websocketHeaders(server.URL),
+	})
+	if err != nil {
+		t.Fatalf("dial while initial snapshot is blocked: %v", err)
+	}
+	defer func() { _ = connection.CloseNow() }()
+
+	deadline := time.Now().Add(time.Second)
+	for application.hub.clientCount() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := application.hub.clientCount(); got != 1 {
+		t.Fatalf("registered WebSocket clients = %d, want 1 before snapshot", got)
+	}
+	application.hub.Broadcast(Event{Type: "session.updated", SessionID: "during-snapshot", Sequence: 7,
+		At: time.Now().UTC()})
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	for index, wantType := range []string{"snapshot", "session.updated"} {
+		_, payload, readErr := connection.Read(ctx)
+		if readErr != nil {
+			t.Fatalf("read event %d: %v", index, readErr)
+		}
+		var event Event
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode event %d: %v", index, err)
+		}
+		if event.Type != wantType {
+			t.Fatalf("event %d type = %q, want %q", index, event.Type, wantType)
+		}
+	}
+}
+
 func TestMalformedWebSocketRequestIsRejected(t *testing.T) {
 	_, server := newSecurityTestServer(t, false)
 	request := securityAuthenticatedRequest(t, http.MethodGet, server.URL+"/api/v1/ws", nil)

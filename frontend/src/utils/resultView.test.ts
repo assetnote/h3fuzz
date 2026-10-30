@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Result } from '../types/api';
-import { buildResultTree, flattenResultTree, resultLocation, resultTitle } from './resultView';
+import { buildResultTree, flattenResultTree, resultLocation, resultScanTarget, resultTitle } from './resultView';
 
 function result(id: number, url: string): Result {
   return {
@@ -33,6 +33,17 @@ describe('result view data', () => {
   it('does not make malformed or non-http result URLs openable', () => {
     expect(resultLocation(result(1, 'not a URL')).openURL).toBeUndefined();
     expect(resultLocation(result(2, 'javascript:alert(1)')).openURL).toBeUndefined();
+  });
+
+  it('derives a safe recursive scan target from a discovered URL', () => {
+    expect(resultScanTarget('https://target.example/admin?source=scan#result')).toBe(
+      'https://target.example/admin/FUZZ',
+    );
+    expect(resultScanTarget('https://target.example/admin/')).toBe(
+      'https://target.example/admin/FUZZ',
+    );
+    expect(resultScanTarget('javascript:alert(1)')).toBeUndefined();
+    expect(resultScanTarget('not a URL')).toBeUndefined();
   });
 
   it('uses only explicit title scraper values and normalizes whitespace', () => {

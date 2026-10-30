@@ -72,6 +72,7 @@ interface SessionDashboardProps {
   onRunPreflight?: () => void;
   onAddFilters?: (filters: SessionFilterPatch) => Promise<void>;
   onCloneEdit?: () => void;
+  onCloneResult?: (url: string) => void;
   onCompare?: () => void;
   onArchive?: () => void;
   onDelete: () => void;
@@ -147,6 +148,7 @@ export function SessionDashboard({
   onRunPreflight,
   onAddFilters,
   onCloneEdit,
+  onCloneResult,
   onCompare,
   onArchive,
   onDelete,
@@ -509,6 +511,7 @@ export function SessionDashboard({
               loading={loadingResults}
               totalResults={session.result_count}
               windowTruncated={resultsTruncated}
+              onCloneURL={onCloneResult}
             />
           </Tabs.Panel>
           <Tabs.Panel value="terminal" pt="md">

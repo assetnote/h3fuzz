@@ -63,18 +63,18 @@ Common archive names are:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86-64 | `h3fuzz_0.1.0_linux_amd64.tar.gz` |
-| Linux ARM64 | `h3fuzz_0.1.0_linux_arm64.tar.gz` |
-| macOS Apple silicon | `h3fuzz_0.1.0_macOS_arm64.tar.gz` |
-| macOS Intel | `h3fuzz_0.1.0_macOS_amd64.tar.gz` |
-| Windows x86-64 | `h3fuzz_0.1.0_windows_amd64.zip` |
+| Linux x86-64 | `h3fuzz_0.2.0_linux_amd64.tar.gz` |
+| Linux ARM64 | `h3fuzz_0.2.0_linux_arm64.tar.gz` |
+| macOS Apple silicon | `h3fuzz_0.2.0_macOS_arm64.tar.gz` |
+| macOS Intel | `h3fuzz_0.2.0_macOS_amd64.tar.gz` |
+| Windows x86-64 | `h3fuzz_0.2.0_windows_amd64.zip` |
 
 The GitHub CLI can download a specific archive and its checksum file. This
 example downloads the Linux x86-64 release. Authenticate first with
 `gh auth login` when the repository requires GitHub access:
 
 ```sh
-version=0.1.0
+version=0.2.0
 asset="h3fuzz_${version}_linux_amd64.tar.gz"
 gh release download "v${version}" \
   --repo assetnote/h3fuzz \
@@ -248,7 +248,9 @@ The database stores result metadata, not raw HTTP response bodies. Large scans
 can still consume substantial space when most responses are retained. Filter
 the target's normal not-found response, delete sessions that are no longer
 needed, and use Compact database after deletion when disk space must be
-returned to the operating system.
+returned to the operating system. See the
+[web console storage guide](docs/storage.md) for the retained fields, growth
+model, per-session cleanup workflow, and architecture notes.
 
 ## Command-line use
 

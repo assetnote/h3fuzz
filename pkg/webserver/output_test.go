@@ -11,6 +11,20 @@ import (
 	"github.com/assetnote/h3fuzz/pkg/ffuf"
 )
 
+func TestCompactResultInputDropsOnlyInternalFFUFHash(t *testing.T) {
+	input := map[string][]byte{"FUZZ": []byte("admin"), "FFUFHASH": []byte("internal"), "OTHER": []byte("kept")}
+	got := compactResultInput(input)
+	if _, exists := got["FFUFHASH"]; exists {
+		t.Fatal("FFUFHASH was retained in durable result input")
+	}
+	if string(got["FUZZ"]) != "admin" || string(got["OTHER"]) != "kept" {
+		t.Fatalf("user-visible result inputs changed: %#v", got)
+	}
+	if _, exists := input["FFUFHASH"]; !exists {
+		t.Fatal("input map was mutated")
+	}
+}
+
 type fakeBatchStore struct {
 	mu      sync.Mutex
 	count   int

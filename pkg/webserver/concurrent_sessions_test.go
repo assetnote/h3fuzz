@@ -123,7 +123,7 @@ func TestConcurrentSessionsPauseIndependentlyAndPersistIsolatedResults(t *testin
 			t.Fatalf("session %s result URL = %q, want path %q", session.Name, results[0].URL, wantPath)
 		}
 	}
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 }
 
 // TestDockerHarnessConcurrentHTTP3Sessions is an opt-in integration test for

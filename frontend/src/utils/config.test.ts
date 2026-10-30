@@ -23,6 +23,18 @@ describe('language profiles', () => {
     expect(config.input.extensions).toBe(expected);
     expect(config.input.dirsearch_compat).toBe(true);
   });
+
+  it('offers a custom profile without overwriting configured extensions', () => {
+    const profile = bundledProfiles.find((candidate) => candidate.id === 'custom');
+    expect(profile).toBeDefined();
+    const source = cloneConfig(defaultConfig);
+    source.input.extensions = 'graphql,json,xml';
+
+    const config = applyProfile(source, profile!);
+
+    expect(config.input.extensions).toBe('graphql,json,xml');
+    expect(config.input.dirsearch_compat).toBe(true);
+  });
 });
 
 describe('configuration snapshots', () => {

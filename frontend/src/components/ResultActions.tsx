@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Tooltip, notifications } from './ui';
-import { IconArrowUpRight, IconBraces, IconCopy, IconRoute } from './ui/icons';
+import { IconArrowUpRight, IconBraces, IconCopy, IconPlus, IconRoute } from './ui/icons';
 import { copyText } from '../utils/clipboard';
 import { resultCurl } from '../utils/resultView';
 
@@ -8,9 +8,10 @@ interface ResultActionsProps {
   url: string;
   openURL?: string;
   label?: string;
+  onCloneURL?: (url: string) => void;
 }
 
-export function ResultActions({ uri, url, openURL, label = uri }: ResultActionsProps) {
+export function ResultActions({ uri, url, openURL, label = uri, onCloneURL }: ResultActionsProps) {
   const copy = (value: string, kind: 'path' | 'full URL' | 'cURL command') => {
     void copyText(value)
       .then(() => notifications.show({ color: 'green', message: `${kind} copied` }))
@@ -61,6 +62,19 @@ export function ResultActions({ uri, url, openURL, label = uri }: ResultActionsP
           <IconBraces size={14} />
         </ActionIcon>
       </Tooltip>
+      {onCloneURL ? (
+        <Tooltip label="Clone scan from this path">
+          <ActionIcon
+            size="sm"
+            variant="ghost"
+            color="gray"
+            aria-label={`Clone scan from ${label}`}
+            onClick={() => onCloneURL(url)}
+          >
+            <IconPlus size={14} />
+          </ActionIcon>
+        </Tooltip>
+      ) : null}
       <Tooltip label={openURL ? 'Open URL in a new tab' : 'Only HTTP and HTTPS URLs can be opened'}>
         {openURL ? (
           <ActionIcon

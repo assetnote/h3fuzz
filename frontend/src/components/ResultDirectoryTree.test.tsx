@@ -70,7 +70,8 @@ describe('ResultDirectoryTree authoritative loading', () => {
         node('settings', 'settings', { result: result(2, 'admin/settings') }),
       ]));
     const user = userEvent.setup();
-    render(<ResultDirectoryTree sessionID="session-1" query={{ statuses: [200] }} />);
+    const onCloneURL = vi.fn();
+    render(<ResultDirectoryTree sessionID="session-1" query={{ statuses: [200] }} onCloneURL={onCloneURL} />);
 
     const list = await screen.findByRole('list', { name: 'Discovered URL directory tree' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(1);
@@ -78,6 +79,8 @@ describe('ResultDirectoryTree authoritative loading', () => {
     expect(await screen.findByText('admin')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Expand admin' }));
     expect(await screen.findByText('users')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clone scan from https://target.example/users' }));
+    expect(onCloneURL).toHaveBeenCalledWith('https://target.example/users');
     expect(screen.getByRole('button', { name: 'Collapse admin' })).toHaveAttribute('aria-expanded', 'true');
     expect(apiMocks.exploreResultTree).toHaveBeenNthCalledWith(1, 'session-1', {
       statuses: [200], parent: undefined, snapshotID: undefined, offset: 0, limit: 1_000,

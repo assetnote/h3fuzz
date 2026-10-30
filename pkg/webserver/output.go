@@ -19,6 +19,21 @@ func capturedResponseFingerprint(data []byte) string {
 	return fmt.Sprintf("sha256:%x", digest)
 }
 
+// compactResultInput retains values that can be used to reconstruct or export
+// a finding, but drops ffuf's internal correlation hash. FFUFHASH is generated
+// for each request, is never shown by the web console, and otherwise adds tens
+// of bytes to every durable result in large scans.
+func compactResultInput(source map[string][]byte) map[string][]byte {
+	input := make(map[string][]byte, len(source))
+	for key, value := range source {
+		if key == "FFUFHASH" {
+			continue
+		}
+		input[key] = append([]byte(nil), value...)
+	}
+	return input
+}
+
 const (
 	resultBatchSize   = 1000
 	terminalBatchSize = 1000
@@ -174,10 +189,7 @@ func (o *webOutput) log(level, message string) {
 }
 
 func (o *webOutput) Result(resp ffuf.Response) {
-	input := make(map[string][]byte, len(resp.Request.Input))
-	for key, value := range resp.Request.Input {
-		input[key] = append([]byte(nil), value...)
-	}
+	input := compactResultInput(resp.Request.Input)
 	result := StoredResult{SessionID: o.sessionID, Input: input, Position: resp.Request.Position,
 		StatusCode: resp.StatusCode, ContentLength: resp.ContentLength, ContentWords: resp.ContentWords,
 		ContentLines: resp.ContentLines, ContentType: resp.ContentType,
@@ -216,7 +228,7 @@ func (o *webOutput) enqueueResult(result StoredResult) {
 }
 
 func (o *webOutput) PrintResult(result ffuf.Result) {
-	stored := StoredResult{SessionID: o.sessionID, Input: result.Input, Position: result.Position,
+	stored := StoredResult{SessionID: o.sessionID, Input: compactResultInput(result.Input), Position: result.Position,
 		StatusCode: result.StatusCode, ContentLength: result.ContentLength, ContentWords: result.ContentWords,
 		ContentLines: result.ContentLines, ContentType: result.ContentType,
 		RedirectLocation: result.RedirectLocation, URL: result.Url, DurationNS: result.Duration.Nanoseconds(),

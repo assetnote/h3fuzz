@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	maxExplorerPageSize = 1000
-	maxTerminalSearch   = 512
-	maxSavedViewName    = 80
-	maxPresetName       = 80
+	maxExplorerPageSize    = 1000
+	maxTerminalSearch      = 512
+	maxSavedViewName       = 80
+	maxPresetName          = 80
+	resultSummaryMigration = "result_summaries_v1"
 )
 
 // SessionOrganization is intentionally stored separately from the execution
@@ -235,6 +236,42 @@ func (s *Store) migrateProductFeatures(ctx context.Context) error {
 			UNIQUE(session_id,name)
 		)`,
 		`CREATE INDEX IF NOT EXISTS result_views_session ON result_views(session_id,updated_at)`,
+		`CREATE TABLE IF NOT EXISTS result_summaries (
+			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+			total INTEGER NOT NULL DEFAULT 0,
+			min_length INTEGER NOT NULL DEFAULT 0,
+			max_length INTEGER NOT NULL DEFAULT 0,
+			min_words INTEGER NOT NULL DEFAULT 0,
+			max_words INTEGER NOT NULL DEFAULT 0,
+			min_lines INTEGER NOT NULL DEFAULT 0,
+			max_lines INTEGER NOT NULL DEFAULT 0,
+			estimated_bytes INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS result_status_counts (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			status INTEGER NOT NULL,
+			count INTEGER NOT NULL,
+			PRIMARY KEY(session_id,status)
+		) WITHOUT ROWID`,
+		`CREATE TABLE IF NOT EXISTS result_content_type_counts (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			content_type TEXT NOT NULL,
+			count INTEGER NOT NULL,
+			PRIMARY KEY(session_id,content_type)
+		) WITHOUT ROWID`,
+		`CREATE TABLE IF NOT EXISTS result_dimension_summaries (
+			session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+			status INTEGER NOT NULL,
+			content_type TEXT NOT NULL,
+			count INTEGER NOT NULL,
+			min_length INTEGER NOT NULL,
+			max_length INTEGER NOT NULL,
+			min_words INTEGER NOT NULL,
+			max_words INTEGER NOT NULL,
+			min_lines INTEGER NOT NULL,
+			max_lines INTEGER NOT NULL,
+			PRIMARY KEY(session_id,status,content_type)
+		) WITHOUT ROWID`,
 		`CREATE TABLE IF NOT EXISTS presets (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE,
@@ -246,14 +283,108 @@ func (s *Store) migrateProductFeatures(ctx context.Context) error {
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS results_explorer_metrics
-			ON results(session_id,status,content_type,length,words,lines,id)`,
 		`CREATE INDEX IF NOT EXISTS terminal_search_level
 			ON terminal_log(session_id,level,id)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("initialize product feature storage: %w", err)
+		}
+	}
+	if err := s.ensureColumn(ctx, "result_summaries", "estimated_bytes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("add result summary storage estimate: %w", err)
+	}
+	return s.initializeResultSummaryMigration(ctx)
+}
+
+// initializeResultSummaryMigration avoids both bad upgrade choices: it never
+// scans all results during startup, and it does not remove the old covering
+// index while a legacy session still depends on it for responsive facets.
+func (s *Store) initializeResultSummaryMigration(ctx context.Context) error {
+	var pending bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM sessions
+		WHERE NOT EXISTS (SELECT 1 FROM result_summaries WHERE session_id=sessions.id)
+		AND EXISTS (SELECT 1 FROM results WHERE session_id=sessions.id LIMIT 1)
+		LIMIT 1)`).Scan(&pending); err != nil {
+		return fmt.Errorf("inspect legacy result summaries: %w", err)
+	}
+	if pending {
+		return nil
+	}
+	return s.completeResultSummaryMigration(ctx)
+}
+
+func (s *Store) completeResultSummaryMigration(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS results_explorer_metrics`); err != nil {
+		return fmt.Errorf("remove legacy result metrics index: %w", err)
+	}
+	if err := s.markStorageMigration(ctx, resultSummaryMigration); err != nil {
+		return fmt.Errorf("record result summary migration: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) backfillResultSummaries(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM sessions AS session
+		WHERE NOT EXISTS (SELECT 1 FROM result_summaries WHERE session_id=session.id)
+		AND EXISTS (SELECT 1 FROM results WHERE results.session_id=session.id LIMIT 1)`)
+	if err != nil {
+		return err
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			rows.Close()
+			return err
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, sessionID := range sessionIDs {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM result_status_counts WHERE session_id=?`, sessionID); err == nil {
+			_, err = tx.ExecContext(ctx, `DELETE FROM result_content_type_counts WHERE session_id=?`, sessionID)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `DELETE FROM result_dimension_summaries WHERE session_id=?`, sessionID)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO result_summaries
+			(session_id,total,min_length,max_length,min_words,max_words,min_lines,max_lines,estimated_bytes)
+			SELECT ?,COUNT(*),MIN(length),MAX(length),MIN(words),MAX(words),MIN(lines),MAX(lines),
+				COALESCE(SUM(160 + 5*length(session_id) + length(input_json) + length(content_type) +
+				length(redirect_location) + 2*length(url) + length(scraper_json) + length(host) +
+				length(response_fingerprint) + 2*length(tree_origin) + 2*length(tree_path_key) +
+				2*length(tree_suffix)),0)
+			FROM results WHERE session_id=?`, sessionID, sessionID)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO result_status_counts(session_id,status,count)
+				SELECT ?,status,COUNT(*) FROM results WHERE session_id=? GROUP BY status`, sessionID, sessionID)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO result_content_type_counts(session_id,content_type,count)
+				SELECT ?,content_type,COUNT(*) FROM results WHERE session_id=? GROUP BY content_type`, sessionID, sessionID)
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO result_dimension_summaries
+				(session_id,status,content_type,count,min_length,max_length,min_words,max_words,min_lines,max_lines)
+				SELECT ?,status,content_type,COUNT(*),MIN(length),MAX(length),MIN(words),MAX(words),MIN(lines),MAX(lines)
+				FROM results WHERE session_id=? GROUP BY status,content_type`, sessionID, sessionID)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -362,6 +493,95 @@ func boolInt(value bool) int {
 	return 0
 }
 
+// updateResultSummaries maintains the small aggregate tables used by the
+// unfiltered results explorer. One summary write and one write per distinct
+// status/content type replaces a wide metrics index entry for every finding.
+func updateResultSummaries(ctx context.Context, tx *sql.Tx, sessionID string, results []StoredResult, estimatedBytes int64) error {
+	if len(results) == 0 {
+		return nil
+	}
+	first := results[0]
+	minLength, maxLength := first.ContentLength, first.ContentLength
+	minWords, maxWords := first.ContentWords, first.ContentWords
+	minLines, maxLines := first.ContentLines, first.ContentLines
+	statuses := make(map[int64]int64)
+	contentTypes := make(map[string]int64)
+	type dimensionKey struct {
+		status      int64
+		contentType string
+	}
+	type dimensionSummary struct {
+		count                                    int64
+		minLength, maxLength, minWords, maxWords int64
+		minLines, maxLines                       int64
+	}
+	dimensions := make(map[dimensionKey]dimensionSummary)
+	for _, result := range results {
+		minLength, maxLength = min64(minLength, result.ContentLength), max64(maxLength, result.ContentLength)
+		minWords, maxWords = min64(minWords, result.ContentWords), max64(maxWords, result.ContentWords)
+		minLines, maxLines = min64(minLines, result.ContentLines), max64(maxLines, result.ContentLines)
+		statuses[result.StatusCode]++
+		contentTypes[result.ContentType]++
+		key := dimensionKey{status: result.StatusCode, contentType: result.ContentType}
+		dimension, exists := dimensions[key]
+		if !exists {
+			dimension = dimensionSummary{
+				minLength: result.ContentLength, maxLength: result.ContentLength,
+				minWords: result.ContentWords, maxWords: result.ContentWords,
+				minLines: result.ContentLines, maxLines: result.ContentLines,
+			}
+		}
+		dimension.count++
+		dimension.minLength, dimension.maxLength = min64(dimension.minLength, result.ContentLength), max64(dimension.maxLength, result.ContentLength)
+		dimension.minWords, dimension.maxWords = min64(dimension.minWords, result.ContentWords), max64(dimension.maxWords, result.ContentWords)
+		dimension.minLines, dimension.maxLines = min64(dimension.minLines, result.ContentLines), max64(dimension.maxLines, result.ContentLines)
+		dimensions[key] = dimension
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO result_summaries
+		(session_id,total,min_length,max_length,min_words,max_words,min_lines,max_lines,estimated_bytes)
+		VALUES(?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			total=result_summaries.total+excluded.total,
+			min_length=CASE WHEN result_summaries.total=0 THEN excluded.min_length ELSE MIN(result_summaries.min_length,excluded.min_length) END,
+			max_length=CASE WHEN result_summaries.total=0 THEN excluded.max_length ELSE MAX(result_summaries.max_length,excluded.max_length) END,
+			min_words=CASE WHEN result_summaries.total=0 THEN excluded.min_words ELSE MIN(result_summaries.min_words,excluded.min_words) END,
+			max_words=CASE WHEN result_summaries.total=0 THEN excluded.max_words ELSE MAX(result_summaries.max_words,excluded.max_words) END,
+			min_lines=CASE WHEN result_summaries.total=0 THEN excluded.min_lines ELSE MIN(result_summaries.min_lines,excluded.min_lines) END,
+			max_lines=CASE WHEN result_summaries.total=0 THEN excluded.max_lines ELSE MAX(result_summaries.max_lines,excluded.max_lines) END,
+			estimated_bytes=result_summaries.estimated_bytes+excluded.estimated_bytes`,
+		sessionID, len(results), minLength, maxLength, minWords, maxWords, minLines, maxLines, estimatedBytes); err != nil {
+		return err
+	}
+	for status, count := range statuses {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO result_status_counts(session_id,status,count) VALUES(?,?,?)
+			ON CONFLICT(session_id,status) DO UPDATE SET count=count+excluded.count`, sessionID, status, count); err != nil {
+			return err
+		}
+	}
+	for contentType, count := range contentTypes {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO result_content_type_counts(session_id,content_type,count) VALUES(?,?,?)
+			ON CONFLICT(session_id,content_type) DO UPDATE SET count=count+excluded.count`, sessionID, contentType, count); err != nil {
+			return err
+		}
+	}
+	for key, dimension := range dimensions {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO result_dimension_summaries
+			(session_id,status,content_type,count,min_length,max_length,min_words,max_words,min_lines,max_lines)
+			VALUES(?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(session_id,status,content_type) DO UPDATE SET
+				count=count+excluded.count,
+				min_length=MIN(min_length,excluded.min_length),max_length=MAX(max_length,excluded.max_length),
+				min_words=MIN(min_words,excluded.min_words),max_words=MAX(max_words,excluded.max_words),
+				min_lines=MIN(min_lines,excluded.min_lines),max_lines=MAX(max_lines,excluded.max_lines)`,
+			sessionID, key.status, key.contentType, dimension.count,
+			dimension.minLength, dimension.maxLength, dimension.minWords, dimension.maxWords,
+			dimension.minLines, dimension.maxLines); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func resultSignature(result StoredResult) (string, bool) {
 	fingerprint := strings.TrimSpace(result.ResponseFingerprint)
 	if fingerprint == "" {
@@ -423,6 +643,18 @@ func resultExplorerPredicate(sessionID string, query ResultExplorerQuery) ([]str
 	return where, args
 }
 
+func resultExplorerHasRowFilters(query ResultExplorerQuery) bool {
+	return query.Search != "" || len(query.Statuses) > 0 || len(query.ContentTypes) > 0 ||
+		query.SizeMin != nil || query.SizeMax != nil || query.WordsMin != nil || query.WordsMax != nil ||
+		query.LinesMin != nil || query.LinesMax != nil
+}
+
+func resultExplorerHasOnlyDimensionFilters(query ResultExplorerQuery) bool {
+	return query.Search == "" && (len(query.Statuses) > 0 || len(query.ContentTypes) > 0) &&
+		query.SizeMin == nil && query.SizeMax == nil && query.WordsMin == nil && query.WordsMax == nil &&
+		query.LinesMin == nil && query.LinesMax == nil
+}
+
 func (s *Store) ExploreResults(ctx context.Context, sessionID string, query ResultExplorerQuery) (ResultExplorerPage, error) {
 	if query.Limit <= 0 {
 		query.Limit = 200
@@ -433,12 +665,19 @@ func (s *Store) ExploreResults(ctx context.Context, sessionID string, query Resu
 	if query.Offset < 0 {
 		query.Offset = 0
 	}
-	resultFilter, err := s.resultFilter(ctx, sessionID)
+	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return ResultExplorerPage{}, err
 	}
-
 	where, args := resultExplorerPredicate(sessionID, query)
+	storedFilterPredicate, storedFilterArgs, err := storedResultFilterSQL(session.ResultFilters)
+	if err != nil {
+		return ResultExplorerPage{}, err
+	}
+	if storedFilterPredicate != "" {
+		where = append(where, storedFilterPredicate)
+		args = append(args, storedFilterArgs...)
+	}
 
 	orderColumns := map[string]string{
 		"created": "id", "url": "url", "status": "status", "content_type": "content_type",
@@ -452,8 +691,9 @@ func (s *Store) ExploreResults(ctx context.Context, sessionID string, query Resu
 	if query.Descending {
 		direction = "DESC"
 	}
-	if len(resultFilter.providers) == 0 && !query.GroupDuplicates {
-		return s.exploreResultsIndexed(ctx, sessionID, query, where, args, orderColumn, direction)
+	if !query.GroupDuplicates {
+		return s.exploreResultsIndexed(ctx, sessionID, query, where, args, orderColumn, direction,
+			storedFilterPredicate == "")
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,input_json,position,status,length,words,lines,content_type,
 		redirect_location,url,duration_ns,scraper_json,host,response_fingerprint,created_at FROM results WHERE `+
@@ -475,13 +715,6 @@ func (s *Store) ExploreResults(ctx context.Context, sessionID string, query Resu
 		result, scanErr := scanStoredResult(rows, sessionID)
 		if scanErr != nil {
 			return ResultExplorerPage{}, scanErr
-		}
-		keep, filterErr := resultFilter.keep(result)
-		if filterErr != nil {
-			return ResultExplorerPage{}, filterErr
-		}
-		if !keep {
-			continue
 		}
 		page.Facets.Status[strconv.FormatInt(result.StatusCode, 10)]++
 		page.Facets.ContentType[result.ContentType]++
@@ -539,52 +772,36 @@ func (s *Store) ExploreResults(ctx context.Context, sessionID string, query Resu
 }
 
 func (s *Store) exploreResultsIndexed(ctx context.Context, sessionID string, query ResultExplorerQuery,
-	where []string, args []any, orderColumn, direction string) (ResultExplorerPage, error) {
+	where []string, args []any, orderColumn, direction string, summaryEligible bool) (ResultExplorerPage, error) {
 	clause := strings.Join(where, " AND ")
 	page := ResultExplorerPage{
 		Results: []ExploredResult{}, Offset: query.Offset, Limit: query.Limit,
 		Facets: ResultFacets{Status: map[string]int64{}, ContentType: map[string]int64{}},
 	}
-	var sizeMin, sizeMax, wordsMin, wordsMax, linesMin, linesMax sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),MIN(length),MAX(length),MIN(words),MAX(words),MIN(lines),MAX(lines)
-		FROM results WHERE `+clause, args...).Scan(&page.Total, &sizeMin, &sizeMax, &wordsMin, &wordsMax, &linesMin, &linesMax); err != nil {
-		return ResultExplorerPage{}, err
-	}
-	if sizeMin.Valid {
-		page.Facets.Size = NumericFacet{Min: sizeMin.Int64, Max: sizeMax.Int64}
-		page.Facets.Words = NumericFacet{Min: wordsMin.Int64, Max: wordsMax.Int64}
-		page.Facets.Lines = NumericFacet{Min: linesMin.Int64, Max: linesMax.Int64}
-	}
-	statusRows, err := s.db.QueryContext(ctx, `SELECT status,COUNT(*) FROM results WHERE `+clause+` GROUP BY status`, args...)
-	if err != nil {
-		return ResultExplorerPage{}, err
-	}
-	for statusRows.Next() {
-		var status, count int64
-		if err := statusRows.Scan(&status, &count); err != nil {
-			statusRows.Close()
+	if resultExplorerHasRowFilters(query) || !summaryEligible {
+		loaded := false
+		var err error
+		if summaryEligible && resultExplorerHasOnlyDimensionFilters(query) {
+			loaded, err = s.loadResultDimensionSummary(ctx, sessionID, query, &page)
+			if err != nil {
+				return ResultExplorerPage{}, err
+			}
+		}
+		if !loaded {
+			if err := s.loadResultFacetsFromRows(ctx, clause, args, &page); err != nil {
+				return ResultExplorerPage{}, err
+			}
+		}
+	} else {
+		found, err := s.loadResultSummary(ctx, sessionID, &page)
+		if err != nil {
 			return ResultExplorerPage{}, err
 		}
-		page.Facets.Status[strconv.FormatInt(status, 10)] = count
-	}
-	if err := statusRows.Close(); err != nil {
-		return ResultExplorerPage{}, err
-	}
-	typeRows, err := s.db.QueryContext(ctx, `SELECT content_type,COUNT(*) FROM results WHERE `+clause+` GROUP BY content_type`, args...)
-	if err != nil {
-		return ResultExplorerPage{}, err
-	}
-	for typeRows.Next() {
-		var contentType string
-		var count int64
-		if err := typeRows.Scan(&contentType, &count); err != nil {
-			typeRows.Close()
-			return ResultExplorerPage{}, err
+		if !found {
+			if err := s.loadResultFacetsFromRows(ctx, clause, args, &page); err != nil {
+				return ResultExplorerPage{}, err
+			}
 		}
-		page.Facets.ContentType[contentType] = count
-	}
-	if err := typeRows.Close(); err != nil {
-		return ResultExplorerPage{}, err
 	}
 	rowArgs := append(append([]any{}, args...), query.Limit, query.Offset)
 	rows, err := s.db.QueryContext(ctx, `SELECT id,input_json,position,status,length,words,lines,content_type,
@@ -609,6 +826,165 @@ func (s *Store) exploreResultsIndexed(ctx context.Context, sessionID string, que
 	}
 	page.HasMore = int64(query.Offset+len(page.Results)) < page.Total
 	return page, nil
+}
+
+func (s *Store) loadResultDimensionSummary(ctx context.Context, sessionID string, query ResultExplorerQuery,
+	page *ResultExplorerPage) (bool, error) {
+	var available bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM result_dimension_summaries WHERE session_id=? LIMIT 1)`, sessionID).Scan(&available); err != nil {
+		return false, err
+	}
+	if !available {
+		return false, nil
+	}
+	where := []string{"session_id=?"}
+	args := []any{sessionID}
+	if len(query.Statuses) > 0 {
+		placeholders := make([]string, len(query.Statuses))
+		for index, status := range query.Statuses {
+			placeholders[index] = "?"
+			args = append(args, status)
+		}
+		where = append(where, `status IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	if len(query.ContentTypes) > 0 {
+		placeholders := make([]string, len(query.ContentTypes))
+		for index, contentType := range query.ContentTypes {
+			placeholders[index] = "?"
+			args = append(args, contentType)
+		}
+		where = append(where, `content_type IN (`+strings.Join(placeholders, ",")+`)`)
+	}
+	clause := strings.Join(where, " AND ")
+	var total, sizeMin, sizeMax, wordsMin, wordsMax, linesMin, linesMax sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT SUM(count),MIN(min_length),MAX(max_length),
+		MIN(min_words),MAX(max_words),MIN(min_lines),MAX(max_lines)
+		FROM result_dimension_summaries WHERE `+clause, args...).Scan(
+		&total, &sizeMin, &sizeMax, &wordsMin, &wordsMax, &linesMin, &linesMax); err != nil {
+		return false, err
+	}
+	if total.Valid {
+		page.Total = total.Int64
+		page.Facets.Size = NumericFacet{Min: sizeMin.Int64, Max: sizeMax.Int64}
+		page.Facets.Words = NumericFacet{Min: wordsMin.Int64, Max: wordsMax.Int64}
+		page.Facets.Lines = NumericFacet{Min: linesMin.Int64, Max: linesMax.Int64}
+	}
+	statusRows, err := s.db.QueryContext(ctx, `SELECT status,SUM(count) FROM result_dimension_summaries
+		WHERE `+clause+` GROUP BY status`, args...)
+	if err != nil {
+		return false, err
+	}
+	for statusRows.Next() {
+		var status, count int64
+		if err := statusRows.Scan(&status, &count); err != nil {
+			statusRows.Close()
+			return false, err
+		}
+		page.Facets.Status[strconv.FormatInt(status, 10)] = count
+	}
+	if err := statusRows.Close(); err != nil {
+		return false, err
+	}
+	typeRows, err := s.db.QueryContext(ctx, `SELECT content_type,SUM(count) FROM result_dimension_summaries
+		WHERE `+clause+` GROUP BY content_type`, args...)
+	if err != nil {
+		return false, err
+	}
+	for typeRows.Next() {
+		var contentType string
+		var count int64
+		if err := typeRows.Scan(&contentType, &count); err != nil {
+			typeRows.Close()
+			return false, err
+		}
+		page.Facets.ContentType[contentType] = count
+	}
+	return true, typeRows.Close()
+}
+
+func (s *Store) loadResultSummary(ctx context.Context, sessionID string, page *ResultExplorerPage) (bool, error) {
+	err := s.db.QueryRowContext(ctx, `SELECT total,min_length,max_length,min_words,max_words,min_lines,max_lines
+		FROM result_summaries WHERE session_id=?`, sessionID).Scan(&page.Total,
+		&page.Facets.Size.Min, &page.Facets.Size.Max, &page.Facets.Words.Min, &page.Facets.Words.Max,
+		&page.Facets.Lines.Min, &page.Facets.Lines.Max)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	statusRows, err := s.db.QueryContext(ctx, `SELECT status,count FROM result_status_counts WHERE session_id=?`, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for statusRows.Next() {
+		var status, count int64
+		if err := statusRows.Scan(&status, &count); err != nil {
+			statusRows.Close()
+			return false, err
+		}
+		page.Facets.Status[strconv.FormatInt(status, 10)] = count
+	}
+	if err := statusRows.Close(); err != nil {
+		return false, err
+	}
+	typeRows, err := s.db.QueryContext(ctx, `SELECT content_type,count FROM result_content_type_counts WHERE session_id=?`, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for typeRows.Next() {
+		var contentType string
+		var count int64
+		if err := typeRows.Scan(&contentType, &count); err != nil {
+			typeRows.Close()
+			return false, err
+		}
+		page.Facets.ContentType[contentType] = count
+	}
+	return true, typeRows.Close()
+}
+
+func (s *Store) loadResultFacetsFromRows(ctx context.Context, clause string, args []any, page *ResultExplorerPage) error {
+	var sizeMin, sizeMax, wordsMin, wordsMax, linesMin, linesMax sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),MIN(length),MAX(length),MIN(words),MAX(words),MIN(lines),MAX(lines)
+		FROM results WHERE `+clause, args...).Scan(&page.Total, &sizeMin, &sizeMax, &wordsMin, &wordsMax, &linesMin, &linesMax); err != nil {
+		return err
+	}
+	if sizeMin.Valid {
+		page.Facets.Size = NumericFacet{Min: sizeMin.Int64, Max: sizeMax.Int64}
+		page.Facets.Words = NumericFacet{Min: wordsMin.Int64, Max: wordsMax.Int64}
+		page.Facets.Lines = NumericFacet{Min: linesMin.Int64, Max: linesMax.Int64}
+	}
+	statusRows, err := s.db.QueryContext(ctx, `SELECT status,COUNT(*) FROM results WHERE `+clause+` GROUP BY status`, args...)
+	if err != nil {
+		return err
+	}
+	for statusRows.Next() {
+		var status, count int64
+		if err := statusRows.Scan(&status, &count); err != nil {
+			statusRows.Close()
+			return err
+		}
+		page.Facets.Status[strconv.FormatInt(status, 10)] = count
+	}
+	if err := statusRows.Close(); err != nil {
+		return err
+	}
+	typeRows, err := s.db.QueryContext(ctx, `SELECT content_type,COUNT(*) FROM results WHERE `+clause+` GROUP BY content_type`, args...)
+	if err != nil {
+		return err
+	}
+	for typeRows.Next() {
+		var contentType string
+		var count int64
+		if err := typeRows.Scan(&contentType, &count); err != nil {
+			typeRows.Close()
+			return err
+		}
+		page.Facets.ContentType[contentType] = count
+	}
+	return typeRows.Close()
 }
 
 func min64(left, right int64) int64 {
@@ -1251,16 +1627,17 @@ func decodeComparisonCursor(cursor string) (string, error) {
 
 func scanComparisonResult(row *sql.Rows) (StoredResult, error) {
 	var result StoredResult
-	var input, scraper []byte
+	var input, scraper, responseFingerprint []byte
 	var created int64
 	if err := row.Scan(&result.ID, &result.SessionID, &input, &result.Position, &result.StatusCode,
 		&result.ContentLength, &result.ContentWords, &result.ContentLines, &result.ContentType,
 		&result.RedirectLocation, &result.URL, &result.DurationNS, &scraper, &result.Host,
-		&result.ResponseFingerprint, &created); err != nil {
+		&responseFingerprint, &created); err != nil {
 		return StoredResult{}, err
 	}
 	_ = json.Unmarshal(input, &result.Input)
 	_ = json.Unmarshal(scraper, &result.ScraperData)
+	result.ResponseFingerprint = unpackResponseFingerprint(responseFingerprint)
 	result.CreatedAt = time.Unix(0, created).UTC()
 	return result, nil
 }

@@ -154,6 +154,21 @@ textarea,
   text-overflow: ellipsis;
 }
 
+.railSelectionControls {
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.railSelectAll {
+  min-width: 0;
+  font-size: 11px;
+}
+
+.railSelectionCount {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .railBulkBar {
   flex: 0 0 auto;
   padding: 7px 10px;
@@ -543,6 +558,36 @@ textarea,
 
 .storageWarningWrap .rt-CalloutRoot {
   width: 100%;
+}
+
+.storageUsageBreakdown {
+  max-width: 760px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--amber-8) 35%, var(--border));
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--amber-3) 18%, transparent);
+}
+
+.storageUsageRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 12px;
+  min-width: 0;
+  align-items: baseline;
+}
+
+.storageUsageName {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .storageUsageRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .storageUsageRow > :nth-child(2) {
+    display: none;
+  }
 }
 
 .mobileHeader {

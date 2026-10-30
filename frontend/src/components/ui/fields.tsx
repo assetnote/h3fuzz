@@ -373,28 +373,33 @@ function changeEvent(checked: boolean): ChangeEvent<HTMLInputElement> {
 }
 
 interface CheckProps extends CompatStyleProps {
-  checked?: boolean;
+  checked?: boolean | 'indeterminate';
   onChange?: ChangeEventHandler<HTMLInputElement>;
   label?: ReactNode;
   description?: ReactNode;
   disabled?: boolean;
+  'aria-label'?: string;
 }
 
 export function Checkbox({ checked, onChange, label, description, disabled, className, ...props }: CheckProps) {
   const id = useId();
   return (
     <label className={cx('uiCheckLabel', className)} style={compatStyle(props)} htmlFor={id}>
-      <RadixCheckbox id={id} checked={checked} disabled={disabled} onCheckedChange={(next) => onChange?.(changeEvent(next === true))} />
+      <RadixCheckbox id={id} checked={checked} disabled={disabled} aria-label={props['aria-label']} onCheckedChange={(next) => onChange?.(changeEvent(next === true))} />
       <span className="uiCheckCopy"><span>{label}</span>{description ? <span className="uiFieldDescription">{description}</span> : null}</span>
     </label>
   );
 }
 
-export function Switch({ checked, onChange, label, description, disabled, className, ...props }: CheckProps) {
+interface SwitchProps extends Omit<CheckProps, 'checked'> {
+  checked?: boolean;
+}
+
+export function Switch({ checked, onChange, label, description, disabled, className, ...props }: SwitchProps) {
   const id = useId();
   return (
     <label className={cx('uiCheckLabel', className)} style={compatStyle(props)} htmlFor={id}>
-      <RadixSwitch id={id} checked={checked} disabled={disabled} onCheckedChange={(next) => onChange?.(changeEvent(next))} />
+      <RadixSwitch id={id} checked={checked} disabled={disabled} aria-label={props['aria-label']} onCheckedChange={(next) => onChange?.(changeEvent(next))} />
       <span className="uiCheckCopy"><span>{label}</span>{description ? <span className="uiFieldDescription">{description}</span> : null}</span>
     </label>
   );

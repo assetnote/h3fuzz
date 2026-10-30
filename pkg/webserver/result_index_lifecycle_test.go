@@ -31,16 +31,16 @@ func resultIndexNames(t *testing.T, store *Store) []string {
 	return names
 }
 
-func assertDeferredResultIndexes(t *testing.T, store *Store, present bool) {
+func assertPersistentResultIndexes(t *testing.T, store *Store) {
 	t.Helper()
 	names := make(map[string]bool)
 	for _, name := range resultIndexNames(t, store) {
 		names[name] = true
 	}
-	for _, index := range deferredResultIndexes {
-		if names[index.name] != present {
-			t.Fatalf("deferred index %q present = %t, want %t (all indexes: %v)",
-				index.name, names[index.name], present, resultIndexNames(t, store))
+	for _, index := range persistentResultIndexes {
+		if !names[index.name] {
+			t.Fatalf("persistent index %q is missing (all indexes: %v)",
+				index.name, resultIndexNames(t, store))
 		}
 	}
 	if !names["results_session_cursor"] {
@@ -48,46 +48,43 @@ func assertDeferredResultIndexes(t *testing.T, store *Store, present bool) {
 	}
 }
 
-func TestDeferredResultIndexesFollowConcurrentIngestLifecycle(t *testing.T) {
+func TestPersistentResultIndexesStayOnlineDuringConcurrentIngest(t *testing.T) {
 	store, err := OpenStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 	if err := store.beginResultIngest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assertDeferredResultIndexes(t, store, false)
+	assertPersistentResultIndexes(t, store)
 	if err := store.beginResultIngest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.endResultIngest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assertDeferredResultIndexes(t, store, false)
+	assertPersistentResultIndexes(t, store)
 	if err := store.endResultIngest(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 	if err := store.endResultIngest(context.Background()); err == nil {
 		t.Fatal("unbalanced ingest release succeeded")
 	}
 }
 
-func TestOpenStoreRepairsIndexesAfterInterruptedIngest(t *testing.T) {
+func TestOpenStoreRepairsMissingPersistentResultIndex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "interrupted.db")
 	store, err := OpenStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.beginResultIngest(context.Background()); err != nil {
+	if _, err := store.db.Exec(`DROP INDEX results_session_status_cursor`); err != nil {
 		t.Fatal(err)
 	}
-	assertDeferredResultIndexes(t, store, false)
-	// Closing here models a process exit after the indexes were dropped but
-	// before the manager could release the scan's ingest reservation.
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -97,10 +94,10 @@ func TestOpenStoreRepairsIndexesAfterInterruptedIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 }
 
-func TestDeferredResultIndexRestoreToleratesConcurrentReader(t *testing.T) {
+func TestResultIngestReleaseDoesNotWaitForConcurrentReader(t *testing.T) {
 	store, err := OpenStore(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -145,20 +142,20 @@ func TestDeferredResultIndexRestoreToleratesConcurrentReader(t *testing.T) {
 		t.Fatalf("restore indexes while a short-lived reader held the results table: %v", err)
 	}
 	<-released
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 	if id == 0 || resultURL == "" {
 		t.Fatalf("unexpected reader values id=%d url=%q", id, resultURL)
 	}
 }
 
-func TestDeferredResultIndexDefinitionsAreUnique(t *testing.T) {
-	seen := make(map[string]struct{}, len(deferredResultIndexes))
-	for _, index := range deferredResultIndexes {
+func TestPersistentResultIndexDefinitionsAreUnique(t *testing.T) {
+	seen := make(map[string]struct{}, len(persistentResultIndexes))
+	for _, index := range persistentResultIndexes {
 		if index.name == "" || index.sql == "" {
-			t.Fatalf("empty deferred index definition: %#v", index)
+			t.Fatalf("empty persistent index definition: %#v", index)
 		}
 		if _, duplicate := seen[index.name]; duplicate {
-			t.Fatalf("duplicate deferred index definition %q", index.name)
+			t.Fatalf("duplicate persistent index definition %q", index.name)
 		}
 		seen[index.name] = struct{}{}
 	}

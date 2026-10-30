@@ -12,6 +12,7 @@ interface ResultDirectoryTreeProps {
   query: ResultFilterViewQuery;
   revision?: number;
   loading?: boolean;
+  onCloneURL?: (url: string) => void;
 }
 
 interface LoadedTreeNode extends ResultTreeNode {
@@ -70,7 +71,7 @@ function treeFilterQuery(query: ResultFilterViewQuery): ResultFilterViewQuery {
   return filters;
 }
 
-export function ResultDirectoryTree({ sessionID, query, revision = 0, loading = false }: ResultDirectoryTreeProps) {
+export function ResultDirectoryTree({ sessionID, query, revision = 0, loading = false, onCloneURL }: ResultDirectoryTreeProps) {
   const [roots, setRoots] = useState<LoadedTreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(() => new Set());
@@ -231,7 +232,13 @@ export function ResultDirectoryTree({ sessionID, query, revision = 0, loading = 
                   {node.result_count > 1 ? (
                     <Text className="resultTreeCount" fz={10} c="dimmed">{node.result_count.toLocaleString()}</Text>
                   ) : null}
-                  <ResultActions uri={node.uri} url={node.url} openURL={location.openURL} label={node.url} />
+                  <ResultActions
+                    uri={node.uri}
+                    url={node.url}
+                    openURL={location.openURL}
+                    label={node.url}
+                    onCloneURL={onCloneURL}
+                  />
                 </Box>
               );
             })}

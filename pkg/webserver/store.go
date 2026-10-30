@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,48 @@ import (
 var ErrNotFound = errors.New("not found")
 
 const terminalResultSQLFunction = "h3fuzz_result_terminal"
+const compactFingerprintSQLFunction = "h3fuzz_compact_fingerprint"
+const compactInputSQLFunction = "h3fuzz_compact_input"
+
+const packedSHA256FingerprintMarker byte = 1
+
+// packResponseFingerprint stores the common sha256:<hex> representation as a
+// tagged 33-byte blob instead of 71 bytes of text. The tag makes this format
+// unambiguous with both legacy text and arbitrary caller-provided values.
+func packResponseFingerprint(value string) any {
+	if strings.HasPrefix(value, "sha256:") && len(value) == len("sha256:")+64 {
+		digest, err := hex.DecodeString(value[len("sha256:"):])
+		if err == nil {
+			packed := make([]byte, 1+len(digest))
+			packed[0] = packedSHA256FingerprintMarker
+			copy(packed[1:], digest)
+			return packed
+		}
+	}
+	return value
+}
+
+func unpackResponseFingerprint(value []byte) string {
+	if len(value) == 33 && value[0] == packedSHA256FingerprintMarker {
+		return "sha256:" + hex.EncodeToString(value[1:])
+	}
+	return string(value)
+}
+
+// estimateStoredResultBytes apportions the dominant table and index payload to
+// a session without running dbstat across millions of rows. It deliberately
+// includes repeated indexed keys and a conservative per-row SQLite overhead;
+// callers should present it as an estimate, not an exact file allocation.
+func estimateStoredResultBytes(sessionID string, input, scraper []byte, result StoredResult,
+	origin, pathKey, suffix string, fingerprint any) int64 {
+	fingerprintBytes := len(result.ResponseFingerprint)
+	if packed, ok := fingerprint.([]byte); ok {
+		fingerprintBytes = len(packed)
+	}
+	return int64(160 + 5*len(sessionID) + len(input) + len(result.ContentType) +
+		len(result.RedirectLocation) + 2*len(result.URL) + len(scraper) + len(result.Host) +
+		fingerprintBytes + 2*len(origin) + 2*len(pathKey) + 2*len(suffix))
+}
 
 func init() {
 	sqlite.MustRegisterDeterministicScalarFunction(terminalResultSQLFunction, 6,
@@ -43,6 +86,46 @@ func init() {
 			}
 			return formatResultTerminalFields(url, values[0], values[1], values[2], values[3], values[4]), nil
 		})
+	sqlite.MustRegisterDeterministicScalarFunction(compactFingerprintSQLFunction, 1,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("%s expects one argument", compactFingerprintSQLFunction)
+			}
+			var value string
+			switch raw := args[0].(type) {
+			case string:
+				value = raw
+			case []byte:
+				value = string(raw)
+			default:
+				return args[0], nil
+			}
+			return packResponseFingerprint(value), nil
+		})
+	sqlite.MustRegisterDeterministicScalarFunction(compactInputSQLFunction, 1,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("%s expects one argument", compactInputSQLFunction)
+			}
+			var raw []byte
+			switch value := args[0].(type) {
+			case string:
+				raw = []byte(value)
+			case []byte:
+				raw = value
+			default:
+				return args[0], nil
+			}
+			var input map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &input); err != nil {
+				return raw, nil
+			}
+			if _, exists := input["FFUFHASH"]; !exists {
+				return raw, nil
+			}
+			delete(input, "FFUFHASH")
+			return json.Marshal(input)
+		})
 }
 
 func formatResultTerminalFields(url string, status, size, words, lines, durationNS int64) string {
@@ -58,11 +141,18 @@ func formatResultTerminal(result StoredResult) string {
 type Store struct {
 	db *sql.DB
 
-	resultIndexMu    sync.Mutex
-	resultIndexUsers int
+	resultIndexMu        sync.Mutex
+	resultIndexUsers     int
+	persistenceWriteGate chan struct{}
+	reclaimMu            sync.Mutex
+	lastReclaim          time.Time
 }
 
-var deferredResultIndexes = []struct {
+// persistentResultIndexes stay online while scans write results. Older builds
+// dropped and rebuilt these global indexes around every scan. Rebuilding them
+// was O(all historical results), blocked the single SQLite writer, and left
+// the results explorer unindexed for the duration of every active scan.
+var persistentResultIndexes = []struct {
 	name string
 	sql  string
 }{
@@ -70,8 +160,6 @@ var deferredResultIndexes = []struct {
 		ON results(session_id,status,id)`},
 	{name: "results_session_url_cursor", sql: `CREATE INDEX IF NOT EXISTS results_session_url_cursor
 		ON results(session_id,url,id DESC)`},
-	{name: "results_explorer_metrics", sql: `CREATE INDEX IF NOT EXISTS results_explorer_metrics
-		ON results(session_id,status,content_type,length,words,lines,id)`},
 	{name: "results_tree_scope", sql: `CREATE INDEX IF NOT EXISTS results_tree_scope
 		ON results(session_id,tree_origin,tree_path_key,id)`},
 }
@@ -104,10 +192,10 @@ func OpenStore(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create isolated memory database name: %w", err)
 	}
-	dsn := "file:webserver-" + memoryID + "?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate"
+	dsn := "file:webserver-" + memoryID + "?mode=memory&cache=shared&_pragma=auto_vacuum(INCREMENTAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=cache_size(-32768)&_pragma=temp_store(MEMORY)&_txlock=immediate"
 	if path != ":memory:" {
 		dsn = (&url.URL{Scheme: "file", Path: path}).String()
-		dsn += "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+		dsn += "?_pragma=auto_vacuum(INCREMENTAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)&_pragma=journal_size_limit(16777216)&_pragma=cache_size(-32768)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)&_txlock=immediate"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -115,7 +203,7 @@ func OpenStore(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	s := &Store{db: db}
+	s := &Store{db: db, persistenceWriteGate: make(chan struct{}, 1)}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -131,72 +219,48 @@ func OpenStore(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-// beginResultIngest removes secondary browsing indexes while one or more scans
-// are producing findings. Maintaining those global B-trees for every response
-// makes retained historical sessions throttle an otherwise fast current scan.
-// The authoritative table and its session cursor remain indexed, so REST reads
-// stay correct while ingestion is active; only uncommon sorts and tree queries
-// may use a temporary SQLite sort until the indexes are restored.
-func (s *Store) beginResultIngest(ctx context.Context) error {
-	s.resultIndexMu.Lock()
-	defer s.resultIndexMu.Unlock()
-	if s.resultIndexUsers > 0 {
-		s.resultIndexUsers++
-		return nil
+func (s *Store) reservePersistenceWrite(ctx context.Context) (func(), error) {
+	select {
+	case s.persistenceWriteGate <- struct{}{}:
+		return func() { <-s.persistenceWriteGate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
+}
+
+// beginResultIngest tracks concurrent writers without mutating global schema.
+// Keeping the indexes online makes historical database size independent from
+// scan start/finish latency and keeps read queries predictable during scans.
+func (s *Store) beginResultIngest(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-	for _, index := range deferredResultIndexes {
-		if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+index.name); err != nil {
-			return fmt.Errorf("suspend result index %s: %w", index.name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("suspend result indexes: %w", err)
-	}
-	s.resultIndexUsers = 1
+	s.resultIndexMu.Lock()
+	defer s.resultIndexMu.Unlock()
+	s.resultIndexUsers++
 	return nil
 }
 
-// endResultIngest restores secondary indexes after the final concurrent scan
-// has drained its persistence queue. Building each index once over the finished
-// data is substantially cheaper than random B-tree maintenance in the request
-// hot path and keeps later browsing fully indexed.
+// endResultIngest releases a writer reservation. It intentionally performs no
+// DDL or index build on the latency-sensitive scan completion path.
 func (s *Store) endResultIngest(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.resultIndexMu.Lock()
 	defer s.resultIndexMu.Unlock()
 	if s.resultIndexUsers <= 0 {
 		return fmt.Errorf("result index ingest reservation is not active")
 	}
 	s.resultIndexUsers--
-	if s.resultIndexUsers > 0 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-	for _, index := range deferredResultIndexes {
-		if _, err := tx.ExecContext(ctx, index.sql); err != nil {
-			return fmt.Errorf("restore result index %s: %w", index.name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("restore result indexes: %w", err)
-	}
 	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {
 	statements := []string{
+		// This must precede the first schema object. New databases can then
+		// return freed tail pages incrementally without a full-file rewrite.
+		`PRAGMA auto_vacuum=INCREMENTAL`,
 		`PRAGMA journal_mode=WAL`,
 		`PRAGMA synchronous=NORMAL`,
 		`PRAGMA foreign_keys=ON`,
@@ -285,6 +349,10 @@ func (s *Store) migrate(ctx context.Context) error {
 			password TEXT NOT NULL,
 			created_at INTEGER NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS storage_migrations (
+			name TEXT PRIMARY KEY,
+			completed_at INTEGER NOT NULL
+		) WITHOUT ROWID`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -312,8 +380,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	// Directory-tree metadata is denormalized onto each result once, when the
 	// result is persisted. This keeps every tree expansion from reparsing and
-	// unmarshalling an entire large scan. Existing databases are backfilled
-	// below before the covering prefix index is created.
+	// unmarshalling an entire large scan. Legacy rows are upgraded only during
+	// explicit storage maintenance so startup remains bounded for large DBs.
 	for column, declaration := range map[string]string{
 		"tree_origin":         "TEXT NOT NULL DEFAULT ''",
 		"tree_path_key":       "TEXT NOT NULL DEFAULT ''",
@@ -335,12 +403,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "results", "response_fingerprint", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := s.backfillResultTreeMetadata(ctx); err != nil {
-		return fmt.Errorf("backfill result tree metadata: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS results_tree_scope
-		ON results(session_id,tree_origin,tree_path_key,id)`); err != nil {
-		return fmt.Errorf("initialize result tree index: %w", err)
+	if err := s.initializeResultTreeMigration(ctx); err != nil {
+		return err
 	}
 	// A process restart cannot resume an in-memory engine. Preserve the tab and
 	// results, but make the interrupted terminal state explicit.
@@ -615,9 +679,9 @@ func (s *Store) UpdateSessionConfig(ctx context.Context, session Session) error 
 }
 
 // UpdateSessionFilters persists the complete ffuf filter configuration and the
-// post-start subset used for retroactive result visibility. The visible result
-// count is recomputed in the same transaction, so session snapshots, result
-// pages, and exports all switch to the new filter set together.
+// post-start subset used for retroactive result visibility. The historical
+// recount runs in a WAL read snapshot, outside a write transaction, so adding a
+// filter cannot block active result persistence while scanning a large session.
 func (s *Store) UpdateSessionFilters(ctx context.Context, id string, options ffuf.ConfigOptions, resultOptions ffuf.FilterOptions, explicitFlags []string) error {
 	optionsJSON, err := json.Marshal(options)
 	if err != nil {
@@ -631,58 +695,46 @@ func (s *Store) UpdateSessionFilters(ctx context.Context, id string, options ffu
 	if err != nil {
 		return err
 	}
-	resultFilter, err := newStoredResultFilter(resultOptions)
+	keepPredicate, keepArgs, err := storedResultFilterSQL(resultOptions)
 	if err != nil {
 		return err
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
+	if keepPredicate == "" {
+		keepPredicate = "1"
+	}
+	// MAX(id) and the conditional count are evaluated by one read statement and
+	// therefore one WAL snapshot. Writers continue committing while it scans.
+	countQuery := `SELECT COALESCE(MAX(id),0),COALESCE(SUM(CASE WHEN ` + keepPredicate + ` THEN 1 ELSE 0 END),0)
+		FROM results WHERE session_id=?`
+	countArgs := append(append([]any{}, keepArgs...), id)
+	var boundaryID, visible int64
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&boundaryID, &visible); err != nil {
+		return err
+	}
+	// Atomically publish the new filter and reconcile the small post-snapshot
+	// tail while holding the writer. Inserts before this statement used the old
+	// filter, but are recounted by the subquery; inserts after commit use the new
+	// filter and increment from the exact count. Cancellation before this point
+	// leaves both configuration and count unchanged.
+	tailQuery := `UPDATE sessions SET options_json=?,result_filters_json=?,explicit_flags_json=?,result_count=?+(
+		SELECT COUNT(*) FROM results WHERE session_id=? AND id>? AND (` + keepPredicate + `)
+	),updated_at=? WHERE id=?`
+	tailArgs := []any{optionsJSON, resultOptionsJSON, explicitJSON, visible, id, boundaryID}
+	tailArgs = append(tailArgs, keepArgs...)
+	tailArgs = append(tailArgs, time.Now().UTC().UnixNano(), id)
+	release, err := s.reservePersistenceWrite(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-	updatedAt := time.Now().UTC().UnixNano()
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET options_json=?,result_filters_json=?,explicit_flags_json=?,updated_at=? WHERE id=?`,
-		optionsJSON, resultOptionsJSON, explicitJSON, updatedAt, id)
+	defer release()
+	result, err := s.db.ExecContext(ctx, tailQuery, tailArgs...)
 	if err != nil {
 		return err
 	}
 	if count, _ := result.RowsAffected(); count == 0 {
 		return ErrNotFound
 	}
-	// Live additions are metric-only, so the recount does not need to decode
-	// input/scraper JSON or load URLs. Keeping this scan narrow matters when a
-	// broad match policy has retained hundreds of thousands of findings.
-	rows, err := tx.QueryContext(ctx, `SELECT status,length,words,lines,duration_ns FROM results WHERE session_id=?`, id)
-	if err != nil {
-		return err
-	}
-	visible := int64(0)
-	for rows.Next() {
-		var stored StoredResult
-		if scanErr := rows.Scan(&stored.StatusCode, &stored.ContentLength, &stored.ContentWords,
-			&stored.ContentLines, &stored.DurationNS); scanErr != nil {
-			rows.Close()
-			return scanErr
-		}
-		keep, filterErr := resultFilter.keep(stored)
-		if filterErr != nil {
-			rows.Close()
-			return filterErr
-		}
-		if keep {
-			visible++
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET result_count=? WHERE id=?`, visible, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) UpdateSessionStatus(ctx context.Context, id string, status SessionStatus, errText string, started, completed *time.Time) error {
@@ -756,6 +808,11 @@ func (s *Store) UpdateProgressTelemetry(ctx context.Context, id string, progress
 	if err != nil {
 		return err
 	}
+	release, err := s.reservePersistenceWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if diagnostics == nil {
 		_, err = s.db.ExecContext(ctx, `UPDATE sessions SET progress_json=?,sequence=?,updated_at=? WHERE id=?`,
 			b, sequence, time.Now().UTC().UnixNano(), id)
@@ -783,6 +840,34 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	if n, _ := result.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	// A bounded idle reclaim prevents normal session cleanup from leaving an
+	// ever-growing file on new incremental-vacuum databases. It is best effort:
+	// deletion has already committed and must not be reported as failed.
+	_ = s.reclaimFreelistIfIdle(ctx)
+	return nil
+}
+
+func (s *Store) reclaimFreelistIfIdle(ctx context.Context) error {
+	s.reclaimMu.Lock()
+	defer s.reclaimMu.Unlock()
+	if !s.lastReclaim.IsZero() && time.Since(s.lastReclaim) < 5*time.Second {
+		return nil
+	}
+	active, err := s.activeScanCount(ctx)
+	if err != nil || active > 0 {
+		return err
+	}
+	var mode int
+	if err := s.db.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		return err
+	}
+	if mode != 2 { // 2 = INCREMENTAL; legacy databases opt in during Compact.
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA incremental_vacuum(2048)`); err != nil {
+		return err
+	}
+	s.lastReclaim = time.Now()
 	return nil
 }
 
@@ -790,6 +875,11 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 	if len(results) == 0 && len(logs) == 0 {
 		return results, logs, nil
 	}
+	release, err := s.reservePersistenceWrite(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, err
@@ -833,6 +923,7 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 		defer resultStatement.Close()
 	}
 	visibleResults := make([]StoredResult, 0, len(results))
+	var estimatedBatchBytes int64
 	for i := range results {
 		input, marshalErr := json.Marshal(results[i].Input)
 		if marshalErr != nil {
@@ -843,14 +934,16 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 			return nil, nil, fmt.Errorf("marshal result scraper data: %w", marshalErr)
 		}
 		origin, pathKey, suffix, trailingSlash := resultTreeMetadata(results[i].URL, results[i].Host)
+		fingerprint := packResponseFingerprint(results[i].ResponseFingerprint)
 		inserted, insertErr := resultStatement.ExecContext(ctx, sessionID, input, results[i].Position, results[i].StatusCode,
 			results[i].ContentLength, results[i].ContentWords, results[i].ContentLines, results[i].ContentType,
 			results[i].RedirectLocation, results[i].URL, results[i].DurationNS, scraper, results[i].Host,
-			results[i].ResponseFingerprint, results[i].CreatedAt.UnixNano(),
+			fingerprint, results[i].CreatedAt.UnixNano(),
 			origin, pathKey, suffix, boolInt(trailingSlash))
 		if insertErr != nil {
 			return nil, nil, insertErr
 		}
+		estimatedBatchBytes += estimateStoredResultBytes(sessionID, input, scraper, results[i], origin, pathKey, suffix, fingerprint)
 		assignedIDs[i], insertErr = inserted.LastInsertId()
 		if insertErr != nil {
 			return nil, nil, insertErr
@@ -864,6 +957,9 @@ func (s *Store) InsertResultBatch(ctx context.Context, sessionID string, results
 			visible.ID = assignedIDs[i]
 			visibleResults = append(visibleResults, visible)
 		}
+	}
+	if err := updateResultSummaries(ctx, tx, sessionID, results, estimatedBatchBytes); err != nil {
+		return nil, nil, fmt.Errorf("update result summaries: %w", err)
 	}
 	if err := insertTerminalResultRanges(ctx, tx, sessionID, results, assignedIDs); err != nil {
 		return nil, nil, err
@@ -978,16 +1074,17 @@ func assignTerminalEvents(sessionID string, sequence int64, results []StoredResu
 
 func scanStoredResult(row scanner, sessionID string) (StoredResult, error) {
 	var result StoredResult
-	var input, scraper []byte
+	var input, scraper, responseFingerprint []byte
 	var created int64
 	result.SessionID = sessionID
 	if err := row.Scan(&result.ID, &input, &result.Position, &result.StatusCode, &result.ContentLength,
 		&result.ContentWords, &result.ContentLines, &result.ContentType, &result.RedirectLocation,
-		&result.URL, &result.DurationNS, &scraper, &result.Host, &result.ResponseFingerprint, &created); err != nil {
+		&result.URL, &result.DurationNS, &scraper, &result.Host, &responseFingerprint, &created); err != nil {
 		return StoredResult{}, err
 	}
 	_ = json.Unmarshal(input, &result.Input)
 	_ = json.Unmarshal(scraper, &result.ScraperData)
+	result.ResponseFingerprint = unpackResponseFingerprint(responseFingerprint)
 	result.CreatedAt = time.Unix(0, created).UTC()
 	return result, nil
 }

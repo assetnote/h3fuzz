@@ -87,6 +87,17 @@ func TestExploreResultsFiltersSortsFacetsAndGroupsResponseShapes(t *testing.T) {
 	if page.Facets.Status["200"] != 3 || page.Facets.ContentType["application/json"] != 1 || page.Facets.Size.Min != 42 {
 		t.Fatalf("facets = %#v", page.Facets)
 	}
+	dimensionPage, err := store.ExploreResults(context.Background(), session.ID, ResultExplorerQuery{
+		Statuses: []int64{200}, ContentTypes: []string{"text/html"}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dimensionPage.Total != 3 || len(dimensionPage.Results) != 3 ||
+		dimensionPage.Facets.Status["200"] != 3 || dimensionPage.Facets.ContentType["text/html"] != 3 ||
+		dimensionPage.Facets.Size.Min != 100 || dimensionPage.Facets.Size.Max != 100 {
+		t.Fatalf("dimension summary page = %#v", dimensionPage)
+	}
 	grouped, err := store.ExploreResults(context.Background(), session.ID, ResultExplorerQuery{
 		GroupDuplicates: true, Sort: "created", Limit: 10,
 	})

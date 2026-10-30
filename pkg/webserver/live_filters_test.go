@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -244,6 +245,104 @@ func TestConcurrentSessionFilterAdditionsDoNotLoseUpdates(t *testing.T) {
 	}
 	if !containsString(updated.ExplicitFlags, "fc") || !containsString(updated.ExplicitFlags, "fw") {
 		t.Fatalf("concurrent additions lost explicit flags: %v", updated.ExplicitFlags)
+	}
+}
+
+func TestLargeLiveFilterRecountDoesNotLoseConcurrentResults(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "live-filter.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session := testSession("large-live-filter")
+	if err := store.CreateSession(t.Context(), &session); err != nil {
+		t.Fatal(err)
+	}
+	insertRange := func(ctx context.Context, start, count int) error {
+		for offset := 0; offset < count; offset += 250 {
+			batch := make([]StoredResult, 250)
+			for index := range batch {
+				position := start + offset + index
+				batch[index] = StoredResult{
+					URL: fmt.Sprintf("https://example.test/item-%d", position), StatusCode: 200,
+					ContentWords: int64(7 + position%2), CreatedAt: time.Now().UTC(),
+				}
+			}
+			if _, _, err := store.InsertResultBatch(ctx, session.ID, batch, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := insertRange(t.Context(), 0, 20_000); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	errors := make(chan error, 2)
+	go func() {
+		<-start
+		errors <- insertRange(ctx, 20_000, 10_000)
+	}()
+	go func() {
+		<-start
+		options := session.Options
+		options.Filter.Words = "7"
+		errors <- store.UpdateSessionFilters(ctx, session.ID, options,
+			ffuf.FilterOptions{Mode: "or", Words: "7"}, []string{"fw"})
+	}()
+	close(start)
+	for range 2 {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := store.GetSession(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ResultCount != 15_000 {
+		t.Fatalf("visible result count after concurrent recount = %d, want 15000", updated.ResultCount)
+	}
+	page, err := store.ExploreResults(t.Context(), session.ID, ResultExplorerQuery{Limit: 25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 15_000 || len(page.Results) != 25 {
+		t.Fatalf("filtered explorer after concurrent recount = total:%d rows:%d", page.Total, len(page.Results))
+	}
+}
+
+func TestCancelledLiveFilterRecountLeavesConfigurationAndCountUnchanged(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "cancelled-filter.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session := testSession("cancelled-filter")
+	if err := store.CreateSession(t.Context(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.InsertResultBatch(t.Context(), session.ID, []StoredResult{{
+		URL: "https://example.test/hit", StatusCode: 200, ContentWords: 7, CreatedAt: time.Now().UTC(),
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	options := session.Options
+	options.Filter.Words = "7"
+	if err := store.UpdateSessionFilters(ctx, session.ID, options,
+		ffuf.FilterOptions{Mode: "or", Words: "7"}, []string{"fw"}); err == nil {
+		t.Fatal("cancelled filter update succeeded")
+	}
+	unchanged, err := store.GetSession(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Options.Filter.Words != "" || unchanged.ResultFilters.Words != "" || unchanged.ResultCount != 1 {
+		t.Fatalf("cancelled recount partially persisted state: %#v", unchanged)
 	}
 }
 

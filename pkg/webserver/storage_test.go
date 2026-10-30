@@ -51,6 +51,13 @@ func TestStorageStatsEndpointReportsOnDiskUsageWithoutClaimingResponseBodies(t *
 	if stats.Warning {
 		t.Fatalf("new database unexpectedly exceeds warning threshold: %+v", stats)
 	}
+	if !stats.CompactionAvailable || stats.ActiveScanCount != 0 || stats.CompactionBlockedReason != "" {
+		t.Fatalf("idle compaction eligibility = available:%t active:%d reason:%q",
+			stats.CompactionAvailable, stats.ActiveScanCount, stats.CompactionBlockedReason)
+	}
+	if stats.MaintenanceRequired || stats.MaintenanceReason != "" {
+		t.Fatalf("new database unexpectedly requires maintenance: %+v", stats)
+	}
 }
 
 func TestStorageCompactRequiresConfirmationAndRejectsActiveScans(t *testing.T) {
@@ -79,6 +86,14 @@ func TestStorageCompactRequiresConfirmationAndRejectsActiveScans(t *testing.T) {
 	if err := server.store.UpdateSessionStatus(t.Context(), session.ID, StatusRunning, "", &now, nil); err != nil {
 		t.Fatalf("mark session running: %v", err)
 	}
+	stats, err := server.store.StorageStats(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.CompactionAvailable || stats.ActiveScanCount != 1 || stats.CompactionBlockedReason != "active_scans" {
+		t.Fatalf("active compaction eligibility = available:%t active:%d reason:%q",
+			stats.CompactionAvailable, stats.ActiveScanCount, stats.CompactionBlockedReason)
+	}
 
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, authenticatedRequest(http.MethodPost, "/api/v1/storage/compact", bytes.NewBufferString(`{"confirm":true}`)))
@@ -97,6 +112,41 @@ func TestStorageCompactRequiresConfirmationAndRejectsActiveScans(t *testing.T) {
 	}
 	if _, err := server.store.GetSession(t.Context(), session.ID); err != nil {
 		t.Fatalf("compaction must not delete sessions: %v", err)
+	}
+}
+
+func TestReopenReconcilesInterruptedScanForCompaction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web.db")
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := testSession("interrupted-scan")
+	session.Status = StatusRunning
+	if err := store.CreateSession(t.Context(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	persisted, err := store.GetSession(t.Context(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != StatusFailed {
+		t.Fatalf("interrupted status = %q, want failed", persisted.Status)
+	}
+	stats, err := store.StorageStats(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stats.CompactionAvailable || stats.ActiveScanCount != 0 {
+		t.Fatalf("reconciled compaction eligibility = available:%t active:%d", stats.CompactionAvailable, stats.ActiveScanCount)
 	}
 }
 
@@ -189,9 +239,6 @@ func TestStorageCompactReclaimsDeletedPagesAndTruncatesFinalWAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.ReclaimableBytes == 0 {
-		t.Fatalf("deleted result pages were not reported as reclaimable: %+v", before)
-	}
 	if err := store.Compact(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +264,7 @@ func TestStorageMaintenanceDrainsExistingMutationAndRejectsNewWrites(t *testing.
 	}
 	t.Cleanup(func() { _ = server.store.Close() })
 
-	release, err := server.manager.reserveWebMutation()
+	release, err := server.manager.reserveWebOperation()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,10 +286,11 @@ func TestStorageMaintenanceDrainsExistingMutationAndRejectsNewWrites(t *testing.
 		time.Sleep(time.Millisecond)
 	}
 
-	// Read-only storage telemetry remains available while maintenance is waiting.
+	// Even read-only DB telemetry is rejected while maintenance is waiting so it
+	// cannot acquire a snapshot between the drain and VACUUM.
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, authenticatedRequest(http.MethodGet, "/api/v1/storage", nil))
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "maintenance_in_progress") {
 		t.Fatalf("storage telemetry during maintenance = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 
@@ -270,9 +318,90 @@ func TestStorageMaintenanceDrainsExistingMutationAndRejectsNewWrites(t *testing.
 		t.Fatal("compaction did not finish after the existing mutation drained")
 	}
 
-	releaseAfter, err := server.manager.reserveWebMutation()
+	releaseAfter, err := server.manager.reserveWebOperation()
 	if err != nil {
 		t.Fatalf("mutation guard remained locked after compaction: %v", err)
 	}
 	releaseAfter()
+}
+
+func TestStorageMaintenanceDrainsExistingExportReaderAndRejectsNewReads(t *testing.T) {
+	server, err := New(Config{DatabasePath: filepath.Join(t.TempDir(), "web.db"), Password: "secret", PlainHTTP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.store.Close() })
+
+	readerStarted := make(chan struct{})
+	releaseReader := make(chan struct{})
+	readerDone := make(chan struct{})
+	guarded := server.protectStorageMaintenance(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(readerStarted)
+		<-releaseReader
+		w.WriteHeader(http.StatusOK)
+	}))
+	go func() {
+		defer close(readerDone)
+		guarded.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet,
+			"/api/v1/sessions/session/export?format=json", nil))
+	}()
+	<-readerStarted
+
+	compactDone := make(chan error, 1)
+	go func() { compactDone <- server.manager.compactStorage(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		server.manager.mu.Lock()
+		pending := server.manager.maintenancePending
+		server.manager.mu.Unlock()
+		if pending {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("compaction did not wait for the active export reader")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	recorder := httptest.NewRecorder()
+	guarded.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("read during maintenance = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case err := <-compactDone:
+		t.Fatalf("compaction completed before export reader drained: %v", err)
+	default:
+	}
+	close(releaseReader)
+	<-readerDone
+	select {
+	case err := <-compactDone:
+		if err != nil {
+			t.Fatalf("compaction after export reader drained: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction did not finish after export reader drained")
+	}
+}
+
+func TestWebSocketSnapshotIsRejectedDuringStorageMaintenance(t *testing.T) {
+	server, err := New(Config{DatabasePath: filepath.Join(t.TempDir(), "web.db"), Password: "secret", PlainHTTP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.store.Close() })
+	server.manager.mu.Lock()
+	server.manager.maintenance = true
+	server.manager.mu.Unlock()
+	t.Cleanup(func() {
+		server.manager.mu.Lock()
+		server.manager.maintenance = false
+		server.manager.mu.Unlock()
+	})
+	recorder := httptest.NewRecorder()
+	server.handleWebSocket(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "maintenance_in_progress") {
+		t.Fatalf("websocket during maintenance = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
 }

@@ -90,6 +90,7 @@ interface NewSessionWizardProps {
   profiles?: Profile[];
   options?: OptionMetadata[];
   initialSession?: Session;
+  initialTarget?: string;
   presets?: Preset[];
   presetSaving?: boolean;
   submitting?: boolean;
@@ -99,14 +100,19 @@ interface NewSessionWizardProps {
   onDeletePreset?: (id: string) => void;
 }
 
-function initialForm(settings?: Settings, initialSession?: Session) {
+function initialForm(
+  settings?: Settings,
+  initialSession?: Session,
+  initialTarget?: string,
+  profiles: Profile[] = bundledProfiles,
+) {
   const config = normalizeConfig(initialSession?.options ?? settings?.defaults.options ?? defaultConfig);
   const profileID = initialSession?.profile ?? settings?.defaults.profile ?? 'aspm';
-  const profile = bundledProfiles.find((entry) => entry.id === profileID) ?? bundledProfiles[0];
+  const profile = profiles.find((entry) => entry.id === profileID) ?? profiles[0] ?? bundledProfiles[0];
   const profiled = initialSession ? config : applyProfile(config, profile);
   if (!settings) profiled.input.input_mode = 'pitchfork';
   return {
-    target: initialSession?.target ?? '',
+    target: initialTarget ?? initialSession?.target ?? '',
     name: initialSession ? `${initialSession.name} copy` : '',
     wordlist: initialSession?.wordlist || settings?.defaults.wordlist || 'final.txt',
     profile: profileID,
@@ -141,10 +147,11 @@ function inferProfile(
     .filter(Boolean)
     .sort();
   const match = profiles.find((profile) => {
+    if (profile.id === 'custom') return false;
     const candidate = profile.extensions.map((extension) => extension.toLowerCase()).sort();
     return candidate.length === normalized.length && candidate.every((extension, index) => extension === normalized[index]);
   });
-  return match?.id ?? fallback;
+  return match?.id ?? profiles.find((profile) => profile.id === 'custom')?.id ?? fallback;
 }
 
 export function NewSessionWizard({
@@ -153,6 +160,7 @@ export function NewSessionWizard({
   profiles,
   options = [],
   initialSession,
+  initialTarget,
   presets = [],
   presetSaving,
   submitting,
@@ -163,8 +171,8 @@ export function NewSessionWizard({
 }: NewSessionWizardProps) {
   const fullScreen = useMediaQuery('(max-width: 52em)');
   const availableProfiles = profiles?.length ? profiles : bundledProfiles;
-  const [form, setForm] = useState(() => initialForm(settings, initialSession));
-  const [baseline, setBaseline] = useState(() => initialForm(settings, initialSession));
+  const [form, setForm] = useState(() => initialForm(settings, initialSession, initialTarget, availableProfiles));
+  const [baseline, setBaseline] = useState(() => initialForm(settings, initialSession, initialTarget, availableProfiles));
   const [advancedSearch, setAdvancedSearch] = useState('');
   const [changedOnly, setChangedOnly] = useState(false);
   const [showCompatibility, setShowCompatibility] = useState(false);
@@ -185,7 +193,7 @@ export function NewSessionWizard({
 
   useEffect(() => {
     if (opened && !wasOpened.current) {
-      const next = initialForm(settings, initialSession);
+      const next = initialForm(settings, initialSession, initialTarget, availableProfiles);
       setForm(next);
       setBaseline({ ...next, config: cloneConfig(next.config), explicitFlags: new Set(next.explicitFlags) });
       setAdvancedSearch('');
@@ -201,7 +209,7 @@ export function NewSessionWizard({
       setAllowUnverifiedWordlist(false);
     }
     wasOpened.current = opened;
-  }, [initialSession, opened, settings]);
+  }, [availableProfiles, initialSession, initialTarget, opened, settings]);
 
   const configuredWordlistKey = JSON.stringify((() => {
     const configured = form.config.input.wordlists.map((value) => value.trim()).filter(Boolean);
@@ -332,6 +340,18 @@ export function NewSessionWizard({
       profile: id,
       config: profile ? applyProfile(current.config, profile) : current.config,
       explicitFlags: addExplicitFlags(current.explicitFlags, 'D', 'e', 'mc', 'fc', 'H'),
+    }));
+  };
+
+  const setExtensions = (extensions: string, keepCustom = false) => {
+    setForm((current) => ({
+      ...current,
+      profile: keepCustom ? 'custom' : inferProfile(extensions, availableProfiles, current.profile),
+      config: {
+        ...current.config,
+        input: { ...current.config.input, extensions },
+      },
+      explicitFlags: addExplicitFlags(current.explicitFlags, 'e'),
     }));
   };
 
@@ -701,7 +721,7 @@ export function NewSessionWizard({
               </Grid>
               <Box>
                 <Text fw={600} fz="sm" mb="xs">Language profile</Text>
-                <SimpleGrid className="profileGrid" cols={{ base: 1, sm: 2, md: 5 }} spacing="xs">
+                <SimpleGrid className="profileGrid" cols={{ base: 1, sm: 2, md: 3, lg: 6 }} spacing="xs">
                   {availableProfiles.map((profile) => (
                     <Paper
                       key={profile.id}
@@ -718,11 +738,21 @@ export function NewSessionWizard({
                         {form.profile === profile.id ? <IconCheck size={14} /> : null}
                       </Group>
                       <Text ff="monospace" fz={9} c="dimmed" ta="left" mt={6} lineClamp={1}>
-                        {profile.extensions.join(',')}
+                        {profile.id === 'custom' ? 'Your extensions' : profile.extensions.join(',')}
                       </Text>
                     </Paper>
                   ))}
                 </SimpleGrid>
+                {form.profile === 'custom' ? (
+                  <TextInput
+                    mt="sm"
+                    label="Custom extensions"
+                    description="Comma-separated suffixes, without leading dots"
+                    placeholder="graphql,json,xml"
+                    value={form.config.input.extensions}
+                    onChange={(event) => setExtensions(event.currentTarget.value, true)}
+                  />
+                ) : null}
               </Box>
               {presets.length > 0 || onSavePreset ? (
                 <Paper withBorder p="sm" className="wizardPresetBar">
@@ -863,7 +893,7 @@ export function NewSessionWizard({
                   label="Extensions (-e)"
                   description="Comma-separated suffixes"
                   value={form.config.input.extensions}
-                  onChange={(event) => patchConfig('input', { extensions: event.currentTarget.value })}
+                  onChange={(event) => setExtensions(event.currentTarget.value)}
                 />
                 <NumberInput
                   label="Threads (-t)"

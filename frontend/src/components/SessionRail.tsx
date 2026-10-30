@@ -32,7 +32,7 @@ import {
   IconStack,
   IconTrash,
 } from './ui/icons';
-import { useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Session, SessionOrganization } from '../types/api';
 import { formatRate, progressPercent, targetLabel } from '../utils/format';
 import { effectiveTransport } from '../utils/transport';
@@ -48,6 +48,7 @@ interface SessionRailProps {
   mobile?: boolean;
   organizationPendingIDs?: ReadonlySet<string>;
   bulkPending?: boolean;
+  requestedSelection?: { ids: string[]; requestID: number };
   onSelect: (id: string) => void;
   onNew: () => void;
   onSettings: () => void;
@@ -79,7 +80,7 @@ function protocolLabel(session: Session): string {
 
 export function SessionRail({
   sessions, activeID, page, connected, mobile = false, organizationPendingIDs, bulkPending,
-  onSelect, onNew, onSettings, onOrganization, onBulk,
+  onSelect, onNew, onSettings, onOrganization, onBulk, requestedSelection,
 }: SessionRailProps) {
   const [width, setWidth] = useLocalStorage({ key: 'h3fuzz-session-rail-width', defaultValue: 284, getInitialValueInEffect: false });
   const [query, setQuery] = useState('');
@@ -88,6 +89,7 @@ export function SessionRail({
   const [groupByHost, setGroupByHost] = useState(true);
   const [checkedIDs, setCheckedIDs] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const appliedSelectionRequest = useRef<number | undefined>(undefined);
   const storedWidth = typeof width === 'number' && Number.isFinite(width) ? width : 284;
   const railWidth = Math.min(440, Math.max(220, storedWidth));
 
@@ -105,6 +107,17 @@ export function SessionRail({
       return retained.length === current.size ? current : new Set(retained);
     });
   }, [sessions]);
+
+  useEffect(() => {
+    if (!requestedSelection || appliedSelectionRequest.current === requestedSelection.requestID) return;
+    appliedSelectionRequest.current = requestedSelection.requestID;
+    const valid = new Set(sessions.map(({ id }) => id));
+    const requested = requestedSelection.ids.filter((id) => valid.has(id));
+    setCheckedIDs(new Set(requested));
+    setQuery('');
+    setFilter('all');
+    if (sessions.some((item) => requested.includes(item.id) && item.archived)) setShowArchived(true);
+  }, [requestedSelection, sessions]);
 
   const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (mobile) return;
@@ -144,10 +157,29 @@ export function SessionRail({
     return [...byHost.entries()];
   }, [groupByHost, visible]);
 
+  const visibleSelectionCount = useMemo(
+    () => visible.reduce((count, session) => count + Number(checkedIDs.has(session.id)), 0),
+    [checkedIDs, visible],
+  );
+  const allVisibleSelected = visible.length > 0 && visibleSelectionCount === visible.length;
+  const visibleSelectionState: boolean | 'indeterminate' = allVisibleSelected
+    ? true
+    : visibleSelectionCount > 0
+      ? 'indeterminate'
+      : false;
+
   const toggleChecked = (id: string, checked: boolean) => setCheckedIDs((current) => {
     const next = new Set(current);
     if (checked) next.add(id);
     else next.delete(id);
+    return next;
+  });
+  const toggleAllVisible = (checked: boolean) => setCheckedIDs((current) => {
+    const next = new Set(current);
+    for (const session of visible) {
+      if (checked) next.add(session.id);
+      else next.delete(session.id);
+    }
     return next;
   });
   const runBulk = (action: 'stop' | 'delete' | 'archive') => {
@@ -195,6 +227,17 @@ export function SessionRail({
             >
               {groupByHost ? 'Grouped' : 'Flat list'}
             </Button>
+          </Group>
+          <Group className="railSelectionControls" justify="space-between" gap="xs" wrap="nowrap">
+            <Checkbox
+              className="railSelectAll"
+              label="Select all"
+              aria-label="Select all matching sessions"
+              checked={visibleSelectionState}
+              disabled={!visible.length || bulkPending}
+              onChange={(event) => toggleAllVisible(event.currentTarget.checked)}
+            />
+            <Text className="railSelectionCount" fz={10} c="dimmed">{visible.length} shown</Text>
           </Group>
         </>
       </Box>

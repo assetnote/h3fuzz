@@ -13,7 +13,7 @@ body:
     attributes:
       label: h3fuzz version
       description: Output of `h3fuzz -V`. If you built from source, include the commit.
-      placeholder: "e.g. v0.1.0 or git-2026-10-12-abcdef0"
+      placeholder: "e.g. v0.2.0 or git-2026-10-30-abcdef0"
     validations:
       required: true
   - type: dropdown

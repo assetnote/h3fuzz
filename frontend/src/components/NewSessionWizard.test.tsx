@@ -430,6 +430,34 @@ describe('NewSessionWizard', () => {
     expect(request.explicit_flags).toEqual(expect.arrayContaining(['u', 'w', 'e', 't', 'rate', 'fc', 'H', 'no-http3']));
   });
 
+  it('maps arbitrary imported extensions to the Custom profile and preserves the CLI round trip', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn();
+    render(
+      <NewSessionWizard
+        opened
+        profiles={bundledProfiles}
+        options={commandOptions}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Import a CLI command'), {
+      target: { value: 'h3fuzz -u https://custom.example/FUZZ -w final.txt -D -e graphql,json,xml' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Apply command to form' }));
+
+    expect(screen.getByRole('button', { name: /Custom/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Custom extensions')).toHaveValue('graphql,json,xml');
+    expect(screen.getByLabelText('Generated CLI command')).toHaveTextContent('-e graphql,json,xml');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create & run' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Create & run' }));
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ profile: 'custom' }));
+    expect(onCreate.mock.calls[0][0].options.input.extensions).toBe('graphql,json,xml');
+  });
+
   it('shows an imported HTTP/2 preference as Skip HTTP/3 without rewriting its CLI intent', async () => {
     const user = userEvent.setup();
     render(
@@ -598,6 +626,29 @@ describe('NewSessionWizard', () => {
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ target: source.target, wordlist: 'source.txt' }));
     expect(onCreate.mock.calls[0][0].options.input.extensions).toBe('php,json,xml');
+  });
+
+  it('overrides a cloned session target with a discovered recursive path', () => {
+    const source: Session = {
+      id: 'source', name: 'Production', target: 'https://source.example/FUZZ', status: 'completed',
+      profile: 'dir', wordlist: 'source.txt', options: cloneConfig(defaultConfig), explicit_flags: ['e'],
+      progress: { req_count: 10, req_total: 10, req_sec: 0, queue_pos: 0, queue_total: 0, error_count: 0 },
+      result_count: 2, created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:01:00Z',
+    };
+
+    render(
+      <NewSessionWizard
+        opened
+        initialSession={source}
+        initialTarget="https://source.example/admin/FUZZ"
+        profiles={bundledProfiles}
+        options={commandOptions}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Target URL/)).toHaveValue('https://source.example/admin/FUZZ');
   });
 
   it('resets only the selected section and preserves unrelated explicit flags', async () => {

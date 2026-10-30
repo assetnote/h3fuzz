@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/assetnote/h3fuzz/pkg/ffuf"
 )
@@ -223,14 +225,72 @@ func storedResultFilterSQL(options ffuf.FilterOptions) (string, []any, error) {
 	return "NOT (" + strings.Join(matches, separator) + ")", args, nil
 }
 
+const resultTreeMetadataMigration = "result_tree_metadata_v1"
+
+var errResultTreeMigrationPending = errors.New("result tree metadata requires storage compaction")
+
+// initializeResultTreeMigration keeps database open bounded. An index created
+// by older releases is durable proof that their backfill completed because
+// those releases built it only after rewriting every legacy row. A populated
+// database without the index is left for explicit maintenance instead of
+// performing an unbounded rewrite during every restart.
+func (s *Store) initializeResultTreeMigration(ctx context.Context) error {
+	var indexExists bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM sqlite_master WHERE type='index' AND name='results_tree_scope')`).Scan(&indexExists); err != nil {
+		return fmt.Errorf("inspect result tree migration: %w", err)
+	}
+	if indexExists {
+		return s.markStorageMigration(ctx, resultTreeMetadataMigration)
+	}
+	var resultsExist bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM results LIMIT 1)`).Scan(&resultsExist); err != nil {
+		return fmt.Errorf("inspect legacy result tree rows: %w", err)
+	}
+	if resultsExist {
+		return nil
+	}
+	return s.completeResultTreeMigration(ctx)
+}
+
+func (s *Store) markStorageMigration(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO storage_migrations(name,completed_at) VALUES(?,?)
+		ON CONFLICT(name) DO UPDATE SET completed_at=excluded.completed_at`, name, time.Now().UTC().UnixNano())
+	return err
+}
+
+func (s *Store) storageMigrationComplete(ctx context.Context, name string) (bool, error) {
+	var complete bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM storage_migrations WHERE name=?)`, name).Scan(&complete); err != nil {
+		return false, err
+	}
+	return complete, nil
+}
+
+func (s *Store) completeResultTreeMigration(ctx context.Context) error {
+	if err := s.backfillResultTreeMetadata(ctx); err != nil {
+		return fmt.Errorf("backfill result tree metadata: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS results_tree_scope
+		ON results(session_id,tree_origin,tree_path_key,id)`); err != nil {
+		return fmt.Errorf("initialize result tree index: %w", err)
+	}
+	if err := s.markStorageMigration(ctx, resultTreeMetadataMigration); err != nil {
+		return fmt.Errorf("record result tree migration: %w", err)
+	}
+	return nil
+}
+
 // backfillResultTreeMetadata upgrades existing databases in bounded
-// transactions. The empty origin is a safe migration marker because every
-// parsed or fallback tree location has a non-empty origin.
+// transactions. The primary-key cursor makes the maintenance pass O(rows)
+// without adding a large temporary index solely for migration.
 func (s *Store) backfillResultTreeMetadata(ctx context.Context) error {
 	const batchSize = 2_000
+	var afterID int64
 	for {
 		rows, err := s.db.QueryContext(ctx, `SELECT id,url,host FROM results
-			WHERE tree_origin='' ORDER BY id LIMIT ?`, batchSize)
+			WHERE id>? AND tree_origin='' ORDER BY id LIMIT ?`, afterID, batchSize)
 		if err != nil {
 			return err
 		}
@@ -260,6 +320,7 @@ func (s *Store) backfillResultTreeMetadata(ctx context.Context) error {
 		if len(pending) == 0 {
 			return nil
 		}
+		afterID = pending[len(pending)-1].id
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -293,6 +354,13 @@ func (s *Store) backfillResultTreeMetadata(ctx context.Context) error {
 // entire scan, while SQL grouping avoids allocating and decoding every result
 // in Go. The id boundary keeps all lazy pages on one stable snapshot.
 func (s *Store) ExploreResultTree(ctx context.Context, sessionID string, query ResultExplorerQuery, parent resultTreeScope) (ResultTreePage, error) {
+	complete, err := s.storageMigrationComplete(ctx, resultTreeMetadataMigration)
+	if err != nil {
+		return ResultTreePage{}, err
+	}
+	if !complete {
+		return ResultTreePage{}, errResultTreeMigrationPending
+	}
 	if query.Limit <= 0 {
 		query.Limit = 200
 	}
@@ -547,6 +615,10 @@ func (s *Server) handleExploreResultTree(w http.ResponseWriter, r *http.Request)
 	}
 	page, err := s.store.ExploreResultTree(r.Context(), r.PathValue("id"), query, parent)
 	if err != nil {
+		if errors.Is(err, errResultTreeMigrationPending) {
+			writeAPIError(w, http.StatusConflict, "storage_maintenance_required", err.Error())
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}

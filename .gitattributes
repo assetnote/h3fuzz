@@ -6,7 +6,10 @@
 *.yaml text eol=lf
 
 third_party/** linguist-vendored
-web/dist/** linguist-generated
+# Bundled dependencies can contain whitespace inside generated template
+# literals. Treat the reproducible build output as generated instead of
+# rewriting those upstream bytes for diff whitespace checks.
+web/dist/** -whitespace linguist-generated
 final.txt linguist-generated
 # The generated bundle preserves upstream notice bytes so its embedded
 # SHA-256 identifiers continue to describe the committed verbatim sections.

@@ -27,6 +27,7 @@ var profiles = []Profile{
 	{ID: "php", Name: "PHP", Description: "Common PHP content", Extensions: []string{"php", "html", "htm", "js"}},
 	{ID: "jsp", Name: "JSP / Java", Description: "Common Java web content", Extensions: []string{"jsp", "htm", "html", "do", "action", "js"}},
 	{ID: "dir", Name: "Directories", Description: "Directories and common HTML content", Extensions: []string{"html"}},
+	{ID: "custom", Name: "Custom", Description: "Operator-defined extension set", Extensions: []string{}},
 }
 
 func Profiles() []Profile {
@@ -73,7 +74,12 @@ func applyProfile(opts *ffuf.ConfigOptions, profile Profile) {
 	}
 	opts.HTTP.Headers = append(headers, userAgent)
 	opts.Input.DirSearchCompat = true
-	opts.Input.Extensions = strings.Join(profile.Extensions, ",")
+	// A custom profile describes operator-owned extensions already present in
+	// the structured options. Applying it must not erase saved defaults,
+	// imported CLI values, or named-preset values.
+	if profile.ID != "custom" {
+		opts.Input.Extensions = strings.Join(profile.Extensions, ",")
+	}
 	opts.Matcher.Status = "all"
 	opts.Filter.Status = "404"
 }

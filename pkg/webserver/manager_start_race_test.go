@@ -115,5 +115,5 @@ func TestShutdownWaitsForStartingBuildAndPreventsActivation(t *testing.T) {
 	if active != 0 || starting != 0 {
 		t.Fatalf("manager retained active=%d starting=%d runs after shutdown", active, starting)
 	}
-	assertDeferredResultIndexes(t, store, true)
+	assertPersistentResultIndexes(t, store)
 }

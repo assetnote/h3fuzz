@@ -5,6 +5,8 @@ the web console, creating a scan, and using the CLI.
 
 ## Operator guides
 
+- [Web console storage](storage.md) explains retained data, database growth,
+  cleanup and compaction, and the current SQLite architecture.
 - [Protocol selection and fallback](protocol-selection.md) explains automatic
   HTTP/3, HTTP/2, and HTTP/1.1 selection, forced modes, proxies, and downgrade
   behavior.

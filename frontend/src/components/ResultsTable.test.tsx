@@ -179,7 +179,10 @@ describe('ResultsTable explorer', () => {
     });
     apiMocks.exploreResults.mockResolvedValue(page([titled]));
     const user = userEvent.setup();
-    const { container } = render(<ResultsTable sessionID="session-1" results={[titled]} totalResults={1} />);
+    const onCloneURL = vi.fn();
+    const { container } = render(
+      <ResultsTable sessionID="session-1" results={[titled]} totalResults={1} onCloneURL={onCloneURL} />,
+    );
 
     expect(await screen.findByText(titled.url)).toBeInTheDocument();
     expect(container.querySelector('.resultsViewport > .resultHeader')).not.toBeNull();
@@ -189,6 +192,11 @@ describe('ResultsTable explorer', () => {
     const row = screen.getByText(titled.url).closest('[role="row"]');
     expect(within(row as HTMLElement).getAllByRole('cell')).toHaveLength(6);
 
+    await user.click(screen.getByRole('button', { name: `Clone scan from ${titled.url}` }));
+    expect(onCloneURL).toHaveBeenCalledOnce();
+    expect(onCloneURL).toHaveBeenCalledWith(titled.url);
+    expect(screen.queryByRole('heading', { name: 'Result details' })).not.toBeInTheDocument();
+
     await user.click(screen.getByText(titled.url));
     expect(await screen.findByRole('heading', { name: 'Result details' })).toBeVisible();
     expect(screen.getByText('12 exact captured bodies')).toBeVisible();
@@ -197,6 +205,8 @@ describe('ResultsTable explorer', () => {
       "curl --request GET --url 'https://target.example/docs?name=o'\\''hara'",
     ));
     expect(screen.getByRole('link', { name: 'Open target' })).toHaveAttribute('target', '_blank');
+    await user.click(screen.getByRole('button', { name: 'Clone scan from this result' }));
+    expect(onCloneURL).toHaveBeenCalledTimes(2);
   });
 
   it('saves, reapplies, and deletes named filter views', async () => {

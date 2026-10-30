@@ -19,6 +19,20 @@ export function resultCurl(url: string): string {
   return `curl --request GET --url ${shellQuote(url)}`;
 }
 
+export function resultScanTarget(url: string): string | undefined {
+  try {
+    const parsed = new URL(url.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    parsed.search = '';
+    parsed.hash = '';
+    const pathname = parsed.pathname || '/';
+    parsed.pathname = `${pathname.endsWith('/') ? pathname : `${pathname}/`}FUZZ`;
+    return parsed.href;
+  } catch {
+    return undefined;
+  }
+}
+
 export function resultLocation(result: Pick<Result, 'url' | 'host'>): ResultLocation {
   const fullURL = result.url.trim();
   try {

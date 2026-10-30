@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -14,6 +15,26 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "WebSocket upgrade requires GET")
 		return
 	}
+	// Existing sockets are independent of SQLite and remain connected during
+	// maintenance. Reserve the bounded initial snapshot for a new socket, then
+	// register the client before reading it. Events committed while the snapshot
+	// is loading are queued behind the snapshot instead of falling into a gap
+	// between the database read and live registration.
+	release, err := s.manager.reserveWebOperation()
+	if err != nil {
+		if errors.Is(err, errStorageMaintenance) {
+			writeAPIError(w, http.StatusConflict, "maintenance_in_progress", err.Error())
+			return
+		}
+		writeAPIError(w, http.StatusServiceUnavailable, "manager_unavailable", err.Error())
+		return
+	}
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
 	// The library's default origin policy accepts same-host origins and rejects
 	// cross-origin browser upgrades. Basic Auth has already run in middleware.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
@@ -28,8 +49,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := s.hub.add()
 	defer s.hub.remove(client)
 	sessions, err := s.store.ListSessions(r.Context())
+	release()
+	released = true
 	if err != nil {
-		_ = conn.Close(websocket.StatusInternalError, "could not load session snapshot")
+		_ = conn.Close(websocket.StatusInternalError, "could not load initial session snapshot")
 		return
 	}
 	if err := writeWSEvent(conn, Event{Type: "snapshot", Sequence: 0,
